@@ -42,6 +42,97 @@ paths:
           description: Invalid portfolio UUID.
         '500':
           description: Query failure.
+  /v1/portfolios/{id}/positions/{symbol}:
+    get:
+      operationId: getPositionValuation
+      parameters:
+        - $ref: '#/components/parameters/PortfolioId'
+        - name: symbol
+          in: path
+          required: true
+          schema: { type: string }
+        - name: currency
+          in: query
+          required: true
+          schema: { type: string, minLength: 3, maxLength: 3 }
+        - name: as_of
+          in: query
+          required: true
+          description: Unix timestamp seconds defining valuation cutoff.
+          schema: { type: integer, format: int64 }
+        - name: max_age
+          in: query
+          required: true
+          description: Maximum accepted price age in seconds.
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: Exact position basis and as-of valuation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PositionValuation' }
+        '400': { description: Invalid ID, currency, price or query. }
+  /v1/portfolios/{id}/positions/{symbol}/trades:
+    post:
+      operationId: recordAccountingTrade
+      parameters:
+        - $ref: '#/components/parameters/PortfolioId'
+        - name: symbol
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [side, quantity, price]
+              properties:
+                side: { type: string, enum: [BUY, SELL] }
+                quantity: { type: string }
+                price: { type: string }
+      responses:
+        '201': { description: Accounting trade accepted. }
+        '400': { description: Invalid request or rejected oversell. }
+  /v1/portfolios/{id}/cash:
+    get:
+      operationId: getCashBalance
+      parameters:
+        - $ref: '#/components/parameters/PortfolioId'
+        - name: currency
+          in: query
+          required: true
+          schema: { type: string, minLength: 3, maxLength: 3 }
+      responses:
+        '200': { description: Local portfolio cash balance. }
+        '400': { description: Invalid ID or currency. }
+  /v1/portfolios/{id}/cash/fund:
+    post:
+      operationId: fundCash
+      parameters: [{ $ref: '#/components/parameters/PortfolioId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CashMovement' }
+      responses:
+        '200': { description: Funding accepted; returns local balance. }
+        '400': { description: Invalid request. }
+        '409': { description: Idempotency conflict or insufficient cash. }
+  /v1/portfolios/{id}/cash/withdraw:
+    post:
+      operationId: withdrawCash
+      parameters: [{ $ref: '#/components/parameters/PortfolioId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CashMovement' }
+      responses:
+        '200': { description: Withdrawal accepted; returns local balance. }
+        '400': { description: Invalid request. }
+        '409': { description: Idempotency conflict or insufficient cash. }
 components:
   parameters:
     PortfolioId:
@@ -69,6 +160,25 @@ components:
         Quantity: { type: string }
         AverageCost: { type: string }
         RealizedPnL: { type: string }
+    PositionValuation:
+      type: object
+      required: [symbol, quantity, cost_basis, realized_pnl, market_value, unrealized_pnl, currency, price_as_of]
+      properties:
+        symbol: { type: string }
+        quantity: { type: string }
+        cost_basis: { type: string }
+        realized_pnl: { type: string }
+        market_value: { type: string }
+        unrealized_pnl: { type: string }
+        currency: { type: string }
+        price_as_of: { type: integer, format: int64 }
+    CashMovement:
+      type: object
+      required: [currency, amount, idempotency_key]
+      properties:
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        amount: { type: string, example: '25.00' }
+        idempotency_key: { type: string, minLength: 1 }
     PortfolioSummary:
       type: object
       properties:
