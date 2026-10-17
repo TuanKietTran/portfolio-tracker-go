@@ -17,9 +17,14 @@ Go 1.22, Chi, `shopspring/decimal`, Google UUID. In-memory only.
 | --- | --- | --- |
 | 2026-10-17 | Baseline spec recorded from the shipped service | `08b5e3c`. No handler tests and no Postgres repository yet. |
 | 2026-10-17 | 1000 requests in one minute, retry, playback, coverage | `internal/playback`. 1000 keyed buys plus one 503 retry each finished in 78ms. Replay did not change quantity. A missing key still applies every post. Statement coverage 67.4%. |
+| 2026-10-17 | Definition of done and playback storyboard | `openspec/dod.md` and `openspec/gifs/playback-flow.gif`. GIF review: retry stays at the pre-write state, playback shows the unchanged result. |
 
 ## Out of scope until implemented
 
 - `GetPositions` over HTTP. Positions are nested in the summary.
 - Mark-to-market `TotalValue` and `UnrealizedPnL`. Both are fixed at 0.
 - A portfolio row. Any UUID is accepted. `migrations/001_init.sql` is not used by the server.
+
+## Definition of done
+
+See `openspec/dod.md`. The playback storyboard is `openspec/gifs/playback-flow.gif`.
