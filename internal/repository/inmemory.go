@@ -2,23 +2,25 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/example/portfolio-tracker/internal/domain"
 	"github.com/google/uuid"
-	"github.com/shopspring/decimal"
 )
 
 type InMemoryPortfolio struct {
-	mu        sync.RWMutex
-	trades    map[domain.PortfolioID][]domain.Trade
-	positions map[domain.PortfolioID]map[string]*domain.Position
+	mu          sync.RWMutex
+	trades      map[domain.PortfolioID][]domain.Trade
+	positions   map[domain.PortfolioID]map[string]*domain.Position
+	idempotency map[string]uuid.UUID
 }
 
 func NewInMemoryPortfolio() *InMemoryPortfolio {
 	return &InMemoryPortfolio{
-		trades:    make(map[domain.PortfolioID][]domain.Trade),
-		positions: make(map[domain.PortfolioID]map[string]*domain.Position),
+		trades:      make(map[domain.PortfolioID][]domain.Trade),
+		positions:   make(map[domain.PortfolioID]map[string]*domain.Position),
+		idempotency: make(map[string]uuid.UUID),
 	}
 }
 
@@ -28,6 +30,12 @@ func (r *InMemoryPortfolio) SaveTrade(ctx context.Context, t domain.Trade) error
 
 	if t.ID == uuid.Nil {
 		t.ID = uuid.New()
+	}
+	if t.IdempotencyKey != "" {
+		if existing, ok := r.idempotency[t.IdempotencyKey]; ok {
+			return fmt.Errorf("idempotency key already used: %s", existing)
+		}
+		r.idempotency[t.IdempotencyKey] = t.ID
 	}
 	r.trades[t.PortfolioID] = append(r.trades[t.PortfolioID], t)
 

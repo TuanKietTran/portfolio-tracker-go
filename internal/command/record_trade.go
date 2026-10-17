@@ -10,11 +10,12 @@ import (
 )
 
 type RecordTradeCommand struct {
-	PortfolioID domain.PortfolioID
-	Symbol      string
-	Side        string
-	Quantity    decimal.Decimal
-	Price       decimal.Decimal
+	PortfolioID    domain.PortfolioID
+	Symbol         string
+	Side           string
+	Quantity       decimal.Decimal
+	Price          decimal.Decimal
+	IdempotencyKey string
 }
 
 type RecordTradeHandler struct {
@@ -27,12 +28,13 @@ func NewRecordTradeHandler(repo repository.PortfolioRepository) *RecordTradeHand
 
 func (h *RecordTradeHandler) Handle(ctx context.Context, cmd RecordTradeCommand) error {
 	trade := domain.Trade{
-		ID:          uuid.New(),
-		PortfolioID: cmd.PortfolioID,
-		Symbol:      cmd.Symbol,
-		Side:        cmd.Side,
-		Quantity:    cmd.Quantity,
-		Price:       cmd.Price,
+		ID:             uuid.New(),
+		PortfolioID:    cmd.PortfolioID,
+		Symbol:         cmd.Symbol,
+		Side:           cmd.Side,
+		Quantity:       cmd.Quantity,
+		Price:          cmd.Price,
+		IdempotencyKey: cmd.IdempotencyKey,
 	}
 	return h.repo.SaveTrade(ctx, trade)
 }

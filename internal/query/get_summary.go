@@ -13,9 +13,9 @@ type GetSummaryQuery struct {
 }
 
 type Summary struct {
-	TotalValue     decimal.Decimal
-	UnrealizedPnL  decimal.Decimal
-	Positions      []domain.Position
+	TotalValue    decimal.Decimal
+	UnrealizedPnL decimal.Decimal
+	Positions     []domain.Position
 }
 
 type GetSummaryHandler struct {

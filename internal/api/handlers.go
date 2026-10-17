@@ -28,10 +28,11 @@ func (h *Handlers) Routes() chi.Router {
 }
 
 type tradeReq struct {
-	Symbol   string          `json:"symbol"`
-	Side     string          `json:"side"`
-	Quantity decimal.Decimal `json:"quantity"`
-	Price    decimal.Decimal `json:"price"`
+	Symbol         string          `json:"symbol"`
+	Side           string          `json:"side"`
+	Quantity       decimal.Decimal `json:"quantity"`
+	Price          decimal.Decimal `json:"price"`
+	IdempotencyKey string          `json:"idempotency_key"`
 }
 
 func (h *Handlers) recordTrade(w http.ResponseWriter, r *http.Request) {
@@ -46,11 +47,12 @@ func (h *Handlers) recordTrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err = h.record.Handle(r.Context(), command.RecordTradeCommand{
-		PortfolioID: pid,
-		Symbol:      req.Symbol,
-		Side:        req.Side,
-		Quantity:    req.Quantity,
-		Price:       req.Price,
+		PortfolioID:    pid,
+		Symbol:         req.Symbol,
+		Side:           req.Side,
+		Quantity:       req.Quantity,
+		Price:          req.Price,
+		IdempotencyKey: req.IdempotencyKey,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
