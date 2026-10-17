@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/example/portfolio-tracker/internal/command"
-	"github.com/example/portfolio-tracker/internal/query"
+	"github.com/TuanKietTran/portfolio-tracker-go/internal/command"
+	"github.com/TuanKietTran/portfolio-tracker-go/internal/query"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"

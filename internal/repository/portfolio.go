@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 
-	"github.com/example/portfolio-tracker/internal/domain"
+	"github.com/TuanKietTran/portfolio-tracker-go/internal/domain"
 )
 
 type PortfolioRepository interface {

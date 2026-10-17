@@ -3,8 +3,8 @@ package command
 import (
 	"context"
 
-	"github.com/example/portfolio-tracker/internal/domain"
-	"github.com/example/portfolio-tracker/internal/repository"
+	"github.com/TuanKietTran/portfolio-tracker-go/internal/domain"
+	"github.com/TuanKietTran/portfolio-tracker-go/internal/repository"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 )

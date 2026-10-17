@@ -1,4 +1,4 @@
-module github.com/example/portfolio-tracker
+module github.com/TuanKietTran/portfolio-tracker-go
 
 go 1.22
 
