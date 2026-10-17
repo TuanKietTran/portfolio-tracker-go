@@ -1,0 +1,79 @@
+openapi: 3.0.3
+info:
+  title: Portfolio Tracker API
+  version: 1.0.0
+  description: >-
+    Current implemented contract. Future portfolio, instrument, position, pricing,
+    cash and corporate-action routes are not yet published as callable operations.
+servers:
+  - url: http://localhost:8105
+paths:
+  /v1/portfolios/{id}/trades:
+    post:
+      operationId: recordTrade
+      summary: Record a portfolio trade
+      parameters:
+        - $ref: '#/components/parameters/PortfolioId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TradeRequest'
+      responses:
+        '201':
+          description: Trade accepted; response body is empty.
+        '400':
+          description: Invalid portfolio UUID, malformed JSON, or repository/domain error.
+  /v1/portfolios/{id}/summary:
+    get:
+      operationId: getPortfolioSummary
+      summary: Get portfolio summary
+      parameters:
+        - $ref: '#/components/parameters/PortfolioId'
+      responses:
+        '200':
+          description: Portfolio positions and currently-zero market figures.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortfolioSummary'
+        '400':
+          description: Invalid portfolio UUID.
+        '500':
+          description: Query failure.
+components:
+  parameters:
+    PortfolioId:
+      name: id
+      in: path
+      required: true
+      description: UUID identifying the portfolio.
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    TradeRequest:
+      type: object
+      required: [symbol, side, quantity, price]
+      properties:
+        symbol: { type: string }
+        side: { type: string, description: Legacy behavior accepts any side; BUY and SELL update positions. }
+        quantity: { type: string, example: '2.5', description: Decimal quantity encoded as a JSON decimal string. }
+        price: { type: string, example: '10.25', description: Decimal price encoded as a JSON decimal string. }
+        idempotency_key: { type: string, description: Optional legacy key; repeated keys return 400. }
+    Position:
+      type: object
+      properties:
+        Symbol: { type: string }
+        Quantity: { type: string }
+        AverageCost: { type: string }
+        RealizedPnL: { type: string }
+    PortfolioSummary:
+      type: object
+      properties:
+        TotalValue: { type: string, example: '0' }
+        UnrealizedPnL: { type: string, example: '0' }
+        Positions:
+          type: array
+          items: { $ref: '#/components/schemas/Position' }
