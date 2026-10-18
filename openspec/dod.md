@@ -6,6 +6,7 @@ Met means implemented and asserted by named tests. This is a synthetic local-mem
 
 | Done when | Evidence |
 | --- | --- |
+| Explicit immutable portfolio lifecycle, source failure recovery and legacy isolation | `TestPortfolioCreationConcurrentReplayAndImmutableMetadata`, `TestPortfolioCreationFailuresDoNotConsumeKeyOrAdoptLegacy`, `TestPortfolioLifecycleHTTPConcurrentReplayAndSelectedMethod`, `TestPortfolioLifecycleHTTPUnavailableSourcesAndRecovery` |
 | Both live trade paths share holdings and actual marked summary | `TestRuntimeRouterSharesTradePositionAndMarkedSummary` |
 | Keyed trades replay original snapshots and reject changed payloads | `TestTradeReplayReturnsOriginalSnapshotAndRejectsChangedPayload`, `TestAccountingTradeHTTPReplayConflictAndRequiredKey` |
 | Unfunded buys/withdrawals cannot overdraw local cash under concurrency | `TestConcurrentBuysAndWithdrawalsShareOneCashBoundary`, `TestConcurrentWithdrawalsNeverOverdraw` |
@@ -25,7 +26,7 @@ Met means implemented and asserted by named tests. This is a synthetic local-mem
 | Mutation bodies are bounded and reject unknown/trailing JSON | `TestStrictBoundedBodiesAndUniformErrors` |
 | Shutdown drains active work or forces bounded closure | `TestServeCancellationDrainsActiveRequest`, `TestServeErrorsAndForcedShutdown`; repeated race count10 passed |
 | Parsed OpenAPI paths/statuses match registered runtime routes | `TestOpenAPIParsesAndDeclaresImplementedRoutesAndStatuses` |
-| Domain >=90% and aggregate non-cmd >=80% statement coverage | 2026-10-19 macOS arm64 Go1.27.1: domain95.0%; `go test -p 2 ./... -race -count=1 -coverpkg=./... -coverprofile=coverage.out` aggregate1209/1295=93.36% unique non-cmd statements. Package-local instrumentation1127/1295=87.03%; not an unweighted mean. |
+| Domain >=90% and aggregate non-cmd >=80% statement coverage | 2026-10-19 macOS arm64 Go1.27.1: domain95.0%; `go test -p 2 ./... -race -count=1 -coverpkg=./... -coverprofile=coverage.out` aggregate1303/1389=93.81% unique non-cmd statements. Package-local instrumentation1218/1389=87.69%; not an unweighted mean. |
 
 ## Partial
 
@@ -40,7 +41,6 @@ Met means implemented and asserted by named tests. This is a synthetic local-mem
 | --- | --- |
 | Payment-backed cash/S3 | Local simulation only; external port fails closed pending recoverable reservations/outbox and posted-payment evidence. No direct duplicate ledger postings. |
 | Postgres parity and restart recovery | No durable adapter/outbox; memory loses all state on process restart. |
-| Portfolio lifecycle | No explicit portfolio resource yet; nonzero UUID validation only. |
 | Real-process 10,000 request integration/load | Manager-owned S1/S2/S3/load evidence pending; preserved 1000-request in-process legacy playback is not proof. |
 | CI/Docker execution | No workflow/container run claimed. |
 

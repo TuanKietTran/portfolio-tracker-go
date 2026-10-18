@@ -22,6 +22,8 @@ func NewPortfolioHandlers(service *command.PortfolioService) *PortfolioHandlers 
 }
 func (h *PortfolioHandlers) Routes() chi.Router {
 	r := chi.NewRouter()
+	r.Post("/portfolios", h.createPortfolio)
+	r.Get("/portfolios/{id}", h.getPortfolio)
 	r.Post("/instruments", h.registerInstrument)
 	r.Get("/instruments/{symbol}", h.instrument)
 	r.Post("/prices", h.publishPrice)
@@ -60,6 +62,10 @@ func portfolioID(r *http.Request) (uuid.UUID, error) {
 func writePortfolioError(w http.ResponseWriter, err error) {
 	status, code := 400, "invalid_request"
 	switch {
+	case errors.Is(err, repository.ErrPortfolioConflict):
+		status, code = 409, "portfolio_conflict"
+	case errors.Is(err, repository.ErrPortfolioIdentity):
+		status, code = 503, "portfolio_identity_unavailable"
 	case errors.Is(err, command.ErrReturnsUnavailable):
 		status, code = 503, "returns_unavailable"
 	case errors.Is(err, repository.ErrHistoryClock):

@@ -25,11 +25,28 @@ func TestOpenAPIParsesAndDeclaresImplementedRoutesAndStatuses(t *testing.T) {
 		Paths map[string]map[string]struct {
 			Responses map[string]any `yaml:"responses"`
 		} `yaml:"paths"`
+		Components struct {
+			Schemas map[string]struct {
+				Required   []string `yaml:"required"`
+				Properties map[string]struct {
+					Type   string   `yaml:"type"`
+					Format string   `yaml:"format"`
+					Enum   []string `yaml:"enum"`
+				} `yaml:"properties"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
 	}
 	if err = yaml.Unmarshal(b, &spec); err != nil {
 		t.Fatalf("parse OpenAPI: %v", err)
 	}
+	creation := spec.Components.Schemas["PortfolioCreation"]
+	resource := spec.Components.Schemas["Portfolio"]
+	if strings.Join(creation.Required, ",") != "currency,cost_method" || strings.Join(resource.Required, ",") != "portfolio_id,currency,cost_method,created_at" || resource.Properties["portfolio_id"].Format != "uuid" || resource.Properties["created_at"].Format != "date-time" || strings.Join(creation.Properties["cost_method"].Enum, ",") != "FIFO,AVERAGE_COST" || strings.Join(resource.Properties["currency"].Enum, ",") != "USD,EUR,GBP,JPY" {
+		t.Fatal("portfolio lifecycle schema drift")
+	}
 	want := map[string]map[string][]string{
+		"/v1/portfolios":                                {"post": {"201", "400", "409", "413", "503"}},
+		"/v1/portfolios/{id}":                           {"get": {"200", "400", "404"}},
 		"/v1/portfolios/{id}/returns":                   {"get": {"200", "400", "404", "503"}},
 		"/v1/portfolios/{id}/valuation":                 {"get": {"200", "400", "404"}},
 		"/v1/portfolios/{id}/corporate-actions":         {"post": {"201", "400", "404", "409", "413", "503"}},
@@ -44,7 +61,7 @@ func TestOpenAPIParsesAndDeclaresImplementedRoutesAndStatuses(t *testing.T) {
 		"/v1/portfolios/{id}/summary":                   {"get": {"200", "400"}},
 		"/v1/portfolios/{id}/positions/{symbol}":        {"get": {"200", "400"}},
 		"/v1/portfolios/{id}/positions/{symbol}/trades": {"post": {"201", "400", "409", "413", "503"}},
-		"/v1/portfolios/{id}/cash":                      {"get": {"200", "400"}},
+		"/v1/portfolios/{id}/cash":                      {"get": {"200", "400", "409"}},
 		"/v1/portfolios/{id}/cash/fund":                 {"post": {"200", "400", "409", "503", "413"}},
 		"/v1/portfolios/{id}/cash/withdraw":             {"post": {"200", "400", "409", "503", "413"}},
 	}

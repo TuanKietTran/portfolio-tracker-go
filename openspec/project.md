@@ -10,16 +10,22 @@ Go module1.22; native verification Go1.27.1 macOS arm64. Chi, `shopspring/decima
 
 - `POST /v1/portfolios/{id}/trades`
 - `GET /v1/portfolios/{id}/summary`
+- `POST /v1/portfolios` and `GET /v1/portfolios/{id}` (immutable explicit local metadata)
 
 ## Checkpoints
 
 | Date | Change | Evidence |
 | --- | --- | --- |
+| 2026-10-19 | Explicit immutable keyed local portfolio lifecycle | Parent `3f36d1e`; exact milestone hash in append-only STATUS. `go test -p 2 ./... -race -count=1 -coverprofile=<ctl logs>/lifecycle.cover -cover`; domain95.0%, package-local non-cmd1218/1389=87.69%, cross-package1303/1389=93.81%. Full evidence `lifecycle-gates.log`. |
 | 2026-10-17 | Baseline spec recorded from the shipped service | `08b5e3c`. No handler tests and no Postgres repository yet. |
 | 2026-10-17 | 1000 requests in one minute, retry, playback, coverage | `internal/playback`. 1000 keyed buys plus one 503 retry each finished in 78ms. Replay did not change quantity. A missing key still applies every post. Statement coverage 67.4%. |
 | 2026-10-17 | Definition of done and playback storyboard | `openspec/dod.md` and `openspec/gifs/playback-flow.gif`. GIF review: retry stays at the pre-write state, playback shows the unchanged result. |
 | 2026-10-18 | Accounting trade replay and independent lot snapshots | `e3c0cd9`; `go test -p 2 ./... -race -count=1 -cover`; domain 92.5%, weighted non-cmd 64.52%. |
 | 2026-10-18 | Unified runtime trades/summary and marked totals | `366081e`; `go test -p 2 ./... -race -count=1 -coverprofile=<ctl logs>/unified-runtime.cover -cover`; domain 92.5%, weighted non-cmd 319/502 = 63.55%. `TestRuntimeRouterSharesTradePositionAndMarkedSummary` exercises actual server router. |
+
+### 2026-10-19 explicit portfolio lifecycle checkpoint
+
+Build/vet/empty-gofmt/default and cross-package race/tidy/diff gates passed on Go1.27.1 macOS arm64. `TestPortfolioCreationConcurrentReplayAndImmutableMetadata` proves100-way duplicate creation and isolated original metadata; `TestDistinctConcurrentPortfolioCreationsRemainIsolated` proves100 distinct identities with independent initial history. Failure/legacy-collision tests prove no adoption or consumed key, and HTTP tests prove per-portfolio AVERAGE_COST on a FIFO-default server (worked realized gain15, remaining basis15), denomination409 and source503 recovery. Parsed OpenAPI tests check new routes/statuses and metadata schemas. Creation establishes a zero-investor-flow empty CREATE snapshot; no cash transfer. ADR0007 records immutable metadata and explicit legacy404 compatibility, not a durable migration. Source unchanged after full gates; later archive/docs only. Exact commit recorded in STATUS.
 
 ### 2026-10-18 accounting trade replay checkpoint
 
@@ -59,9 +65,9 @@ Commit recorded in STATUS. Full build/vet/empty-gofmt/race/tidy/diff gates passe
 
 ## Out of scope until implemented
 
-- Generalized zero-capital/multiple-IRR cases, portfolio lifecycle and raw-history HTTP.
+- Generalized zero-capital/multiple-IRR cases and raw-history HTTP.
 - External payment-backed funding and durable persistence.
-- A portfolio row. Any UUID is accepted. `migrations/001_init.sql` is not used by the server.
+- Durable portfolio rows and audited migration of legacy UUID state. Explicit metadata now exists in memory; legacy arbitrary-UUID writes stay unregistered and lookup404. `migrations/001_init.sql` is not used by the server.
 
 ## Definition of done
 

@@ -48,7 +48,14 @@ func (s *PortfolioService) Trade(ctx context.Context, portfolio uuid.UUID, symbo
 	if symbol == "" || strings.TrimSpace(symbol) != symbol {
 		return domain.AccountPosition{}, errors.New("symbol is required")
 	}
-	return s.state.ApplyTrade(ctx, portfolio, symbol, event, s.method, key)
+	method := s.method
+	p, err := s.state.GetPortfolio(ctx, portfolio)
+	if err == nil {
+		method = p.CostMethod
+	} else if !errors.Is(err, repository.ErrNotFound) {
+		return domain.AccountPosition{}, err
+	}
+	return s.state.ApplyTrade(ctx, portfolio, symbol, event, method, key)
 }
 
 func (s *PortfolioService) Position(ctx context.Context, portfolio uuid.UUID, symbol, currency string, asOf, maxAge int64) (domain.AccountPosition, domain.PositionValuation, error) {
@@ -145,6 +152,14 @@ func (s *PortfolioService) MoveCash(ctx context.Context, portfolio uuid.UUID, cu
 		return decimal.Zero, ErrPaymentCashUnavailable
 	}
 	return s.state.MoveCash(ctx, portfolio, currency, direction, amount, key)
+}
+
+func (s *PortfolioService) CreatePortfolio(ctx context.Context, currency string, method domain.CostMethod, key string) (repository.Portfolio, error) {
+	return s.state.CreatePortfolio(ctx, currency, method, key)
+}
+
+func (s *PortfolioService) Portfolio(ctx context.Context, id uuid.UUID) (repository.Portfolio, error) {
+	return s.state.GetPortfolio(ctx, id)
 }
 
 func (s *PortfolioService) CorporateAction(ctx context.Context, portfolio uuid.UUID, symbol string, action domain.CorporateAction, key string) (repository.CorporateResult, error) {

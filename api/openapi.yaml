@@ -16,7 +16,8 @@ info:
     Mutation bodies are limited to 16384 bytes; unknown JSON fields and trailing values
     are rejected with 400, oversized bodies with 413. Keys must be nonblank and at
     most 200 bytes. HTTP_ADDR defaults to :8105, CASH_MODE supports local only,
-    COST_METHOD selects FIFO (default) or AVERAGE_COST. PAYMENTS_URL and DATABASE_URL
+    COST_METHOD selects the legacy FIFO (default) or AVERAGE_COST trade default; explicitly
+    created portfolios use their own immutable cost_method. PAYMENTS_URL and DATABASE_URL
     fail startup until their adapters are implemented. New portfolio balance/holding
     commands return503 without effect if the UTC history clock is invalid or moves
     backwards for that portfolio; original successful-key replays remain available.
@@ -26,6 +27,53 @@ info:
 servers:
   - url: http://localhost:8105
 paths:
+  /v1/portfolios:
+    post:
+      operationId: createPortfolio
+      description: >-
+        Create local immutable portfolio metadata with a generated UUID and UTC created_at.
+        Currency and cost_method are required, never defaulted from server configuration.
+        The dedicated global creation key namespace replays the original 201 result;
+        changed payload is409. Creation atomically appends an empty CREATE history snapshot,
+        with zero investor flow. No cash is funded. Identity/clock failures have no effect
+        and do not consume the key. State is memory-only and lost on restart.
+        Existing arbitrary-UUID commands remain an unregistered legacy compatibility path;
+        this route never adopts or overwrites their state. Generated identity collision
+        returns503 rather than reinterpreting holdings. Registered portfolios enforce their
+        currency on cash/trade/corporate writes and select their own immutable cost method.
+        COST_METHOD remains only the legacy trade default.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PortfolioCreation' }
+      responses:
+        '201':
+          description: Created or original result replayed; Location identifies the lookup route.
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Portfolio' }
+        '400': { description: Invalid currency/cost_method/key/JSON. }
+        '409': { description: Creation key payload conflict. }
+        '413': { description: Body exceeds 16384 bytes. }
+        '503': { description: Invalid clock or unavailable/colliding generated identity; no effect. }
+  /v1/portfolios/{id}:
+    get:
+      operationId: getPortfolio
+      description: Immutable explicitly created metadata only. Unknown or legacy unregistered UUID returns404, even when legacy cash/holdings exist. Reads never create metadata.
+      parameters: [{ $ref: '#/components/parameters/PortfolioId' }]
+      responses:
+        '200':
+          description: Original immutable metadata, not a current cash or holdings projection.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Portfolio' }
+        '400': { description: Invalid or zero UUID. }
+        '404': { description: No explicit portfolio metadata. }
   /v1/instruments:
     post:
       operationId: registerInstrument
@@ -186,7 +234,7 @@ paths:
         '400':
           description: Invalid request, missing/disagreeing key or rejected oversell.
         '409':
-          description: Idempotency key payload conflict or insufficient local cash.
+          description: Idempotency key payload conflict, immutable portfolio currency mismatch or insufficient local cash.
         '503': { description: History clock unavailable or regressed; no effect/key consumption. }
         '413': { description: Request body exceeds 16384 bytes. }
   /v1/portfolios/{id}/returns:
@@ -371,7 +419,7 @@ paths:
       responses:
         '201': { description: Accounting trade accepted or same-payload replay; original position snapshot returned. }
         '400': { description: Invalid request, missing/disagreeing key or rejected oversell. }
-        '409': { description: Insufficient cash or key reused with a different portfolio, symbol, currency, side, quantity or price. }
+        '409': { description: Immutable portfolio currency mismatch, insufficient cash or key reused with a different portfolio, symbol, currency, side, quantity or price. }
         '503': { description: History clock unavailable or regressed; no effect/key consumption. }
         '413': { description: Request body exceeds 16384 bytes. }
   /v1/portfolios/{id}/cash:
@@ -386,6 +434,7 @@ paths:
       responses:
         '200': { description: Local portfolio cash balance. }
         '400': { description: Invalid ID or currency. }
+        '409': { description: Currency differs from explicitly created portfolio denomination. }
   /v1/portfolios/{id}/cash/fund:
     post:
       operationId: fundCash
@@ -402,7 +451,7 @@ paths:
         '200': { description: Funding accepted; returns original balance result on replay. }
         '400': { description: Invalid request. }
         '413': { description: Request body exceeds 16384 bytes. }
-        '409': { description: Idempotency conflict or insufficient cash. }
+        '409': { description: Idempotency or immutable portfolio currency conflict. }
         '503': { description: Unavailable/regressed history clock or unsafe payment boundary; no effect/key consumption/transfer. }
   /v1/portfolios/{id}/cash/withdraw:
     post:
@@ -420,7 +469,7 @@ paths:
         '200': { description: Withdrawal accepted; returns original balance result on replay. }
         '400': { description: Invalid request. }
         '413': { description: Request body exceeds 16384 bytes. }
-        '409': { description: Idempotency conflict or insufficient cash. }
+        '409': { description: Idempotency or immutable portfolio currency conflict, or insufficient cash. }
         '503': { description: Unavailable/regressed history clock or unsafe payment boundary; no effect/key consumption/transfer. }
 components:
   parameters:
@@ -459,6 +508,23 @@ components:
         type: string
         format: uuid
   schemas:
+    PortfolioCreation:
+      type: object
+      additionalProperties: false
+      required: [currency, cost_method]
+      properties:
+        currency: { type: string, enum: [USD, EUR, GBP, JPY] }
+        cost_method: { type: string, enum: [FIFO, AVERAGE_COST] }
+        idempotency_key: { type: string, minLength: 1, maxLength: 200 }
+    Portfolio:
+      type: object
+      additionalProperties: false
+      required: [portfolio_id, currency, cost_method, created_at]
+      properties:
+        portfolio_id: { type: string, format: uuid }
+        currency: { type: string, enum: [USD, EUR, GBP, JPY] }
+        cost_method: { type: string, enum: [FIFO, AVERAGE_COST] }
+        created_at: { type: string, format: date-time, description: Immutable UTC command time; may contain fractional seconds. }
     PortfolioReturn:
       type: object
       required: [currency, from, to, method, rate, annualized, start_nav, end_nav, external_flows]

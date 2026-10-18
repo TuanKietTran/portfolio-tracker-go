@@ -50,6 +50,9 @@ func (s *InMemoryState) ApplyCorporateAction(_ context.Context, portfolio uuid.U
 		}
 		return previous.result.clone(), nil
 	}
+	if err := s.validatePortfolioLocked(portfolio, action.Currency, ""); err != nil {
+		return CorporateResult{}, err
+	}
 	currency, ok := s.instrumentCurrencies[symbol]
 	if !ok {
 		return CorporateResult{}, ErrNotFound

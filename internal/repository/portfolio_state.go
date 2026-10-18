@@ -16,6 +16,8 @@ var ErrIdempotencyConflict = errors.New("idempotency key payload conflict")
 
 // PortfolioState is the atomic persistence boundary for positions and portfolio cash.
 type PortfolioState interface {
+	CreatePortfolio(context.Context, string, domain.CostMethod, string) (Portfolio, error)
+	GetPortfolio(context.Context, uuid.UUID) (Portfolio, error)
 	ReturnWindow(context.Context, uuid.UUID, time.Time, time.Time) (ReturnWindow, error)
 	History(context.Context, uuid.UUID, uint64, int) ([]HistoryRecord, error)
 	SnapshotAt(context.Context, uuid.UUID, time.Time) (PortfolioSnapshot, error)
@@ -61,6 +63,9 @@ func (c tradeCommand) matches(other tradeCommand) bool {
 // InMemoryState serializes position and cash changes. It is not durable across restarts.
 type InMemoryState struct {
 	mu                   sync.RWMutex
+	portfolios           map[uuid.UUID]Portfolio
+	portfolioKeys        map[string]portfolioCreation
+	ids                  IDSource
 	positions            map[stateKey]domain.AccountPosition
 	cash                 map[cashKey]decimal.Decimal
 	cashKeys             map[string]cashCommand
@@ -78,13 +83,20 @@ func NewInMemoryState() *InMemoryState {
 }
 
 func NewInMemoryStateWithClock(clock Clock) (*InMemoryState, error) {
+	return NewInMemoryStateWithSources(clock, uuid.NewRandom)
+}
+
+func NewInMemoryStateWithSources(clock Clock, ids IDSource) (*InMemoryState, error) {
+	if ids == nil {
+		return nil, errors.New("identity source required")
+	}
 	if clock == nil {
 		return nil, errors.New("clock required")
 	}
 	if f, ok := clock.(ClockFunc); ok && f == nil {
 		return nil, errors.New("clock required")
 	}
-	return &InMemoryState{positions: map[stateKey]domain.AccountPosition{}, cash: map[cashKey]decimal.Decimal{}, cashKeys: map[string]cashCommand{}, tradeKeys: map[string]tradeCommand{}, instrumentCurrencies: map[string]string{}, instrumentKeys: map[string]domain.Instrument{}, corporateKeys: map[string]corporateCommand{}, clock: clock, history: map[uuid.UUID][]HistoryRecord{}}, nil
+	return &InMemoryState{portfolios: map[uuid.UUID]Portfolio{}, portfolioKeys: map[string]portfolioCreation{}, ids: ids, positions: map[stateKey]domain.AccountPosition{}, cash: map[cashKey]decimal.Decimal{}, cashKeys: map[string]cashCommand{}, tradeKeys: map[string]tradeCommand{}, instrumentCurrencies: map[string]string{}, instrumentKeys: map[string]domain.Instrument{}, corporateKeys: map[string]corporateCommand{}, clock: clock, history: map[uuid.UUID][]HistoryRecord{}}, nil
 }
 
 func (s *InMemoryState) ApplyTrade(_ context.Context, portfolio uuid.UUID, symbol string, event domain.AccountingEvent, method domain.CostMethod, idempotencyKey string) (domain.AccountPosition, error) {
@@ -110,6 +122,9 @@ func (s *InMemoryState) ApplyTrade(_ context.Context, portfolio uuid.UUID, symbo
 			return domain.AccountPosition{}, ErrIdempotencyConflict
 		}
 		return previous.result.Clone(), nil
+	}
+	if err := s.validatePortfolioLocked(portfolio, event.Currency, method); err != nil {
+		return domain.AccountPosition{}, err
 	}
 	if err := domain.ValidateCashAmount(decimal.Zero, event.Currency); err != nil {
 		return domain.AccountPosition{}, err
@@ -178,6 +193,9 @@ func (s *InMemoryState) CashBalance(_ context.Context, portfolio uuid.UUID, curr
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if err := s.validatePortfolioLocked(portfolio, currency, ""); err != nil {
+		return decimal.Zero, err
+	}
 	return s.cash[cashKey{portfolio, currency}], nil
 }
 
@@ -207,6 +225,9 @@ func (s *InMemoryState) MoveCash(_ context.Context, portfolio uuid.UUID, currenc
 			return decimal.Zero, ErrIdempotencyConflict
 		}
 		return previous.result, nil
+	}
+	if err := s.validatePortfolioLocked(portfolio, currency, ""); err != nil {
+		return decimal.Zero, err
 	}
 	key := cashKey{portfolio, currency}
 	balance := s.cash[key]
