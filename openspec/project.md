@@ -4,7 +4,7 @@ CQRS portfolio simulation. Production named/position trades share exact FIFO acc
 
 ## Stack
 
-Go 1.22, Chi, `shopspring/decimal`, Google UUID. In-memory only.
+Go module1.22; native verification Go1.27.1 macOS arm64. Chi, `shopspring/decimal`, Google UUID. In-memory only; unsupported database/payment configuration fails startup. HTTP defaults :8105 with selectable FIFO/average accounting, bounded lifecycle and local-only readiness.
 
 ## Public API
 
@@ -25,9 +25,13 @@ Go 1.22, Chi, `shopspring/decimal`, Google UUID. In-memory only.
 
 The `/positions/{symbol}/trades` route now requires a key and returns the original snapshot on replay; changed payloads return 409. Its store is still separate from legacy trades/summary. `TestAccountingTradeHTTPReplayConflictAndRequiredKey`, `TestConcurrentTradeReplayAppliesOnce` and `TestAccountingEventsDoNotMutateInputLots` prove the bounded change. On macOS arm64 Go 1.27.1, `go test -p 2 ./... -race -count=1 -coverprofile=<ctl logs>/trade-replay.cover -cover` passed; domain 92.5%, weighted non-cmd 280/434 = 64.52%. Build, vet, empty gofmt and module tidy gates passed. Exact commit is recorded in the append-only lane STATUS (this checkpoint is part of that commit).
 
+### 2026-10-18 operational runtime checkpoint
+
+Commit recorded in STATUS. `go build ./...`, `go vet ./...`, empty `gofmt -l .`, race tests with default and `-coverpkg=./...` profiles, tidy with no module diff and diff check passed. Domain94.9%, server95.5%; aggregate unique non-cmd630/715=88.11%, package-local535/715=74.83%. Full evidence `ctl/logs/portfolio/operations-gates.log`. `go test ./internal/server -race -count=10` passed; lifecycle tests use channel synchronization. Native compiled process on127.0.0.1:8105 with AVERAGE_COST returned200 for readiness/health/metrics and exited0 on SIGTERM; process structured logs in ctl `operations-process.log`. No external cash/persistence/integration claim.
+
 ### 2026-10-18 exact residual-basis checkpoint
 
-Commit recorded in STATUS. `go test -p 2 ./... -race -count=1 -cover` passed: domain 94.9%. `go test -p 2 ./... -race -count=1 -coverpkg=./... -coverprofile=<ctl logs>/basis-residuals-all.cover` passed and measures aggregate non-cmd 506/587 = 86.20% unique statements across all test binaries; default package-local profile is 410/587 = 69.85%. Build/vet/empty-gofmt/tidy gates passed on macOS arm64 Go 1.27.1. Added regressions first failed against `1b99131` (exact residuals logged in ctl `residual-before.log`) and now pass. [ADR 0002](../docs/adr/0002-authoritative-lot-basis.md) defines authoritative basis, 18-place partial-allocation rounding and split representability.
+`21e0842`. `go test -p 2 ./... -race -count=1 -cover` passed: domain 94.9%. `go test -p 2 ./... -race -count=1 -coverpkg=./... -coverprofile=<ctl logs>/basis-residuals-all.cover` passed and measures aggregate non-cmd 506/587 = 86.20% unique statements across all test binaries; default package-local profile is 410/587 = 69.85%. Build/vet/empty-gofmt/tidy gates passed on macOS arm64 Go 1.27.1. Added regressions first failed against `1b99131` (exact residuals logged in ctl `residual-before.log`) and now pass. [ADR 0002](../docs/adr/0002-authoritative-lot-basis.md) defines authoritative basis, 18-place partial-allocation rounding and split representability.
 
 ### 2026-10-18 local cash-linked trade checkpoint
 

@@ -30,13 +30,16 @@ func TestOpenAPIParsesAndDeclaresImplementedRoutesAndStatuses(t *testing.T) {
 		t.Fatalf("parse OpenAPI: %v", err)
 	}
 	want := map[string]map[string][]string{
-		"/v1/portfolios/{id}/trades":                    {"post": {"201", "400", "409"}},
-		"/v1/portfolios/{id}/summary":                   {"get": {"200", "400"}},
-		"/v1/portfolios/{id}/positions/{symbol}":        {"get": {"200", "400"}},
-		"/v1/portfolios/{id}/positions/{symbol}/trades": {"post": {"201", "400", "409"}},
+		"/healthz":                               {"get": {"200"}},
+		"/readyz":                                {"get": {"200", "503", "500"}},
+		"/metrics":                               {"get": {"200"}},
+		"/v1/portfolios/{id}/trades":             {"post": {"201", "400", "409", "413"}},
+		"/v1/portfolios/{id}/summary":            {"get": {"200", "400"}},
+		"/v1/portfolios/{id}/positions/{symbol}": {"get": {"200", "400"}},
+		"/v1/portfolios/{id}/positions/{symbol}/trades": {"post": {"201", "400", "409", "413"}},
 		"/v1/portfolios/{id}/cash":                      {"get": {"200", "400"}},
-		"/v1/portfolios/{id}/cash/fund":                 {"post": {"200", "400", "409", "503"}},
-		"/v1/portfolios/{id}/cash/withdraw":             {"post": {"200", "400", "409", "503"}},
+		"/v1/portfolios/{id}/cash/fund":                 {"post": {"200", "400", "409", "503", "413"}},
+		"/v1/portfolios/{id}/cash/withdraw":             {"post": {"200", "400", "409", "503", "413"}},
 	}
 	if len(spec.Paths) != len(want) {
 		t.Fatalf("OpenAPI paths=%d want=%d", len(spec.Paths), len(want))
@@ -45,8 +48,7 @@ func TestOpenAPIParsesAndDeclaresImplementedRoutesAndStatuses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	router := chi.NewRouter()
-	router.Mount("/v1", NewPortfolioHandlers(service).Routes())
+	router := NewRouter(service, nil, nil)
 	implemented := map[string]bool{}
 	if err := chi.Walk(router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		implemented[strings.ToLower(method)+" "+route] = true

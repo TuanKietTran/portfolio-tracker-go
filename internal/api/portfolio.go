@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/TuanKietTran/portfolio-tracker-go/internal/command"
 	"github.com/TuanKietTran/portfolio-tracker-go/internal/domain"
@@ -42,30 +43,37 @@ type positionResponse struct {
 	PriceAsOf     int64  `json:"price_as_of"`
 }
 
-func portfolioID(r *http.Request) (uuid.UUID, error) { return uuid.Parse(chi.URLParam(r, "id")) }
+func portfolioID(r *http.Request) (uuid.UUID, error) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil || id == uuid.Nil {
+		return uuid.Nil, errors.New("nonzero portfolio UUID required")
+	}
+	return id, nil
+}
 func writePortfolioError(w http.ResponseWriter, err error) {
-	status := http.StatusBadRequest
-	if errors.Is(err, command.ErrPaymentCashUnavailable) {
-		status = http.StatusServiceUnavailable
+	status, code := 400, "invalid_request"
+	switch {
+	case errors.Is(err, command.ErrPaymentCashUnavailable):
+		status, code = 503, "payment_unavailable"
+	case errors.Is(err, repository.ErrInsufficientCash):
+		status, code = 409, "insufficient_cash"
+	case errors.Is(err, repository.ErrIdempotencyConflict):
+		status, code = 409, "idempotency_conflict"
 	}
-	if errors.Is(err, repository.ErrInsufficientCash) || errors.Is(err, repository.ErrIdempotencyConflict) {
-		status = http.StatusConflict
-	}
-	http.Error(w, err.Error(), status)
+	writeError(w, status, code, err.Error())
 }
 func (h *PortfolioHandlers) position(w http.ResponseWriter, r *http.Request) {
 	id, err := portfolioID(r)
 	if err != nil {
-		http.Error(w, "invalid portfolio id", 400)
+		writePortfolioError(w, err)
 		return
 	}
-	currency := r.URL.Query().Get("currency")
 	asOf, maxAge, err := valuationTimes(r)
 	if err != nil {
 		writePortfolioError(w, err)
 		return
 	}
-	p, v, err := h.service.Position(r.Context(), id, chi.URLParam(r, "symbol"), currency, asOf, maxAge)
+	p, v, err := h.service.Position(r.Context(), id, chi.URLParam(r, "symbol"), r.URL.Query().Get("currency"), asOf, maxAge)
 	if err != nil {
 		writePortfolioError(w, err)
 		return
@@ -76,7 +84,7 @@ func (h *PortfolioHandlers) position(w http.ResponseWriter, r *http.Request) {
 func (h *PortfolioHandlers) cash(w http.ResponseWriter, r *http.Request) {
 	id, err := portfolioID(r)
 	if err != nil {
-		http.Error(w, "invalid portfolio id", 400)
+		writePortfolioError(w, err)
 		return
 	}
 	currency := r.URL.Query().Get("currency")
@@ -85,13 +93,15 @@ func (h *PortfolioHandlers) cash(w http.ResponseWriter, r *http.Request) {
 		writePortfolioError(w, err)
 		return
 	}
+	writeCash(w, currency, balance)
+}
+func writeCash(w http.ResponseWriter, currency string, balance decimal.Decimal) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(struct {
 		Currency string `json:"currency"`
 		Balance  string `json:"balance"`
 	}{currency, balance.String()})
 }
-
 func valuationTimes(r *http.Request) (int64, int64, error) {
 	asOf, err := strconv.ParseInt(r.URL.Query().Get("as_of"), 10, 64)
 	if err != nil || asOf <= 0 {
@@ -103,7 +113,6 @@ func valuationTimes(r *http.Request) (int64, int64, error) {
 	}
 	return asOf, maxAge, nil
 }
-
 func (h *PortfolioHandlers) summary(w http.ResponseWriter, r *http.Request) {
 	id, err := portfolioID(r)
 	if err != nil {
@@ -133,28 +142,37 @@ type accountingTradeRequest struct {
 	IdempotencyKey string          `json:"idempotency_key"`
 }
 
+func requestKey(r *http.Request, body string) (string, error) {
+	header := r.Header.Get("Idempotency-Key")
+	if header != "" && body != "" && header != body {
+		return "", errors.New("idempotency header and body disagree")
+	}
+	if header == "" {
+		header = body
+	}
+	if strings.TrimSpace(header) == "" || len(header) > 200 {
+		return "", errors.New("idempotency key must contain 1 through 200 nonblank bytes")
+	}
+	return header, nil
+}
 func (h *PortfolioHandlers) trade(w http.ResponseWriter, r *http.Request) {
 	id, err := portfolioID(r)
 	if err != nil {
-		http.Error(w, "invalid portfolio id", 400)
+		writePortfolioError(w, err)
 		return
 	}
 	var req accountingTradeRequest
-	if err = json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid json", 400)
+	if !decodeRequest(w, r, &req) {
 		return
 	}
-	key := r.Header.Get("Idempotency-Key")
-	if key != "" && req.IdempotencyKey != "" && key != req.IdempotencyKey {
-		http.Error(w, "idempotency header and body disagree", 400)
+	key, err := requestKey(r, req.IdempotencyKey)
+	if err != nil {
+		writePortfolioError(w, err)
 		return
-	}
-	if key == "" {
-		key = req.IdempotencyKey
 	}
 	kind := domain.EventKind(req.Side)
-	if kind != "BUY" && kind != "SELL" {
-		http.Error(w, "side must be BUY or SELL", 400)
+	if kind != domain.Buy && kind != domain.Sell {
+		writePortfolioError(w, errors.New("side must be BUY or SELL"))
 		return
 	}
 	symbol := chi.URLParam(r, "symbol")
@@ -172,7 +190,7 @@ func (h *PortfolioHandlers) trade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
+	w.WriteHeader(201)
 	if !legacyPath {
 		_ = json.NewEncoder(w).Encode(p)
 	}
@@ -187,33 +205,24 @@ type cashRequest struct {
 func (h *PortfolioHandlers) moveCash(w http.ResponseWriter, r *http.Request, direction string) {
 	id, err := portfolioID(r)
 	if err != nil {
-		http.Error(w, "invalid portfolio id", 400)
+		writePortfolioError(w, err)
 		return
 	}
 	var req cashRequest
-	if err = json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid json", 400)
+	if !decodeRequest(w, r, &req) {
 		return
 	}
-	key := r.Header.Get("Idempotency-Key")
-	if key != "" && req.IdempotencyKey != "" && key != req.IdempotencyKey {
-		writePortfolioError(w, errors.New("idempotency header and body disagree"))
+	key, err := requestKey(r, req.IdempotencyKey)
+	if err != nil {
+		writePortfolioError(w, err)
 		return
-	}
-	if key == "" {
-		key = req.IdempotencyKey
 	}
 	balance, err := h.service.MoveCash(r.Context(), id, req.Currency, direction, req.Amount, key)
 	if err != nil {
 		writePortfolioError(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(struct {
-		Currency string `json:"currency"`
-		Balance  string `json:"balance"`
-	}{req.Currency, balance.String()})
+	writeCash(w, req.Currency, balance)
 }
 func (h *PortfolioHandlers) fund(w http.ResponseWriter, r *http.Request) { h.moveCash(w, r, "FUND") }
 func (h *PortfolioHandlers) withdraw(w http.ResponseWriter, r *http.Request) {

@@ -1,40 +1,43 @@
 # Definition of done
 
-A box is **Met** only when the code behaves that way and a test asserts it. **Partial** means the code does it, but no test asserts that scenario. **Unmet** means it is not implemented.
-
-Playback storyboard: `openspec/gifs/playback-flow.gif`.
+Met means implemented and asserted by named tests. This is a synthetic local-memory service, not production-ready. Historical playback/storyboard describes its preserved legacy adapter, not the current runtime's safety guarantees.
 
 ## Met
 
 | Done when | Evidence |
 | --- | --- |
-| A buy with `idempotency_key` is HTTP 201 and increases quantity once | Playback. 1000 keyed buys end at quantity 1000. |
-| Replaying those keys is HTTP 400 and does not change quantity | Playback. Quantity stays 1000. |
-| A buy with no key applies every time | `TestTradeWithoutKeyAppliesTwice`. Quantity 2. |
-| Summary after those buys reports the position | Playback reads the summary. |
-| 1000 trades finish in under 60 seconds, with one HTTP 503 retried on each call | Playback test, 78ms. |
-| HTTP 400 is not retried | Playback unit test. |
-| Statement coverage is measured | 67.4%. |
+| Both live trade paths share holdings and actual marked summary | `TestRuntimeRouterSharesTradePositionAndMarkedSummary` |
+| Keyed trades replay original snapshots and reject changed payloads | `TestTradeReplayReturnsOriginalSnapshotAndRejectsChangedPayload`, `TestAccountingTradeHTTPReplayConflictAndRequiredKey` |
+| Unfunded buys/withdrawals cannot overdraw local cash under concurrency | `TestConcurrentBuysAndWithdrawalsShareOneCashBoundary`, `TestConcurrentWithdrawalsNeverOverdraw` |
+| Local settlement has explicit currency, precision and minor-unit rules | `TestCashAndTradeRejectUnsupportedCurrencyAndFractionalMinorUnits`, `TestRejectFractionalMinorUnitsPolicy` |
+| FIFO/average basis survives repeating splits/allocations and full sale | `TestPartialAllocationsCarryResidualUntilFinalSale`, `TestAverageFullLiquidationConsumesExactRemainingBasis` |
+| Positions require valid as-of price marks instead of zero placeholders | `TestSummaryDeterministicSortedMarkedSnapshot`, `TestPortfolioServiceTradesValuationAndLocalCash` |
+| Operational config rejects unsupported modes/adapters | `TestValidatedRuntimeConfiguration` |
+| Health/readiness/metrics, request IDs, uniform errors and panic recovery | `TestOperationalRequestsRecoveryReadinessAndMetrics` |
+| Mutation bodies are bounded and reject unknown/trailing JSON | `TestStrictBoundedBodiesAndUniformErrors` |
+| Shutdown drains active work or forces bounded closure | `TestServeCancellationDrainsActiveRequest`, `TestServeErrorsAndForcedShutdown`; repeated race count10 passed |
+| Parsed OpenAPI paths/statuses match registered runtime routes | `TestOpenAPIParsesAndDeclaresImplementedRoutesAndStatuses` |
+| Domain >=90% and aggregate non-cmd >=80% statement coverage | 2026-10-18 macOS arm64 Go1.27.1: domain94.9%; `go test -p 2 ./... -race -count=1 -coverpkg=./... -coverprofile=coverage.out` aggregate630/715=88.11% unique non-cmd statements. Package-local instrumentation535/715=74.83%; not an unweighted mean. |
 
 ## Partial
 
-| Done when | Why it is not Met |
+| Capability | Remaining scope |
 | --- | --- |
-| Two buys recompute average cost | Implemented. The 1000-buy case is all at price 10, so the average does not have to change. No test buys at two prices. |
-| A sell updates quantity and realized P&L | Implemented. No test sells. |
-| A side other than BUY or SELL does not move the position | Implemented. No test sends one. |
-| Summary `TotalValue` and `UnrealizedPnL` are 0 | Implemented. The playback test does not assert those two fields. |
-| Invalid portfolio id or invalid JSON is HTTP 400 | Implemented. No test sends them. |
+| Corporate actions | Pure split/dividend/fee accounting exists; no keyed corporate-action HTTP yet. |
+| Returns | Pure TWR and bounded MWR methods tested; no HTTP or stored investor cash-flow history. |
+| Instruments/prices | Pure instrument validation and deterministic injected feed exist; no registry/mark management API. Symbol currency binds on first successful trade. |
+| Documentation | README and two ADRs exist; full glossary/API examples/CI and milestone closure remain. |
 
 ## Unmet
 
-| Not done | Why |
+| Capability | Limitation |
 | --- | --- |
-| Mark-to-market value | `TotalValue` and `UnrealizedPnL` are fixed at 0. |
-| A portfolio row, or Postgres | Any UUID is accepted. The migration is unused. |
-| `GetPositions` as its own route | Positions are nested in the summary. |
-| Coverage at a high bar | 67.4%. Sell, average-cost mix, and `cmd/server` are uncovered. No 80% gate. |
+| Payment-backed cash/S3 | Local simulation only; external port fails closed pending recoverable reservations/outbox and posted-payment evidence. No direct duplicate ledger postings. |
+| Postgres parity and restart recovery | No durable adapter/outbox; memory loses all state on process restart. |
+| Portfolio lifecycle | No explicit portfolio resource yet; nonzero UUID validation only. |
+| Real-process 10,000 request integration/load | Manager-owned S1/S2/S3/load evidence pending; preserved 1000-request in-process legacy playback is not proof. |
+| CI/Docker execution | No workflow/container run claimed. |
 
-## GIF review
+## Historical regression evidence
 
-Good enough. Quantity stays 0 on the retry frame, becomes 1, then 1000, and stays 1000 on HTTP 400. The note on frame 6 says a missing key would still apply. Storyboard, not a screen capture.
+The original playback tests remain unchanged, including legacy missing-key and repeated-key behavior, against `NewHandlers`/`NewInMemoryPortfolio`. These are not production server wiring. Production now rejects missing keys and accepts same-payload replay without another effect. The original storyboard is `openspec/gifs/playback-flow.gif`; it is not a native process capture.

@@ -7,9 +7,43 @@ info:
     Cash remains a local simulation; trades atomically update holdings and cash.
     Instrument/pricing management, corporate-action and returns routes are not yet callable.
     The original in-process playback exercises a separate legacy compatibility adapter.
+    All production responses include X-Request-ID. Errors use the Error schema;
+    common runtime errors are 404 (route), 405 (method) and 500 (panic before response).
+    Mutation bodies are limited to 16384 bytes; unknown JSON fields and trailing values
+    are rejected with 400, oversized bodies with 413. Keys must be nonblank and at
+    most 200 bytes. HTTP_ADDR defaults to :8105, CASH_MODE supports local only,
+    COST_METHOD selects FIFO (default) or AVERAGE_COST. PAYMENTS_URL and DATABASE_URL
+    fail startup until their adapters are implemented.
 servers:
   - url: http://localhost:8105
 paths:
+  /healthz:
+    get:
+      operationId: health
+      responses:
+        '200': { description: Process healthy; reports local cash mode and memory store. }
+  /readyz:
+    get:
+      operationId: readiness
+      description: Local simulation initialized; does not promise downstream availability, durable storage or price coverage.
+      responses:
+        '200': { description: Local simulation ready. }
+        '503': { description: Local simulation uninitialized or readiness check failed. }
+        '500': { description: Recovered readiness panic; no private details returned. }
+  /metrics:
+    get:
+      operationId: metrics
+      responses:
+        '200':
+          description: Per-router process-lifetime counters, including this request; counters reset on restart.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requests: { type: integer, format: int64 }
+                  errors: { type: integer, format: int64 }
+                  panics: { type: integer, format: int64 }
   /v1/portfolios/{id}/trades:
     post:
       operationId: recordTrade
@@ -37,6 +71,7 @@ paths:
           description: Invalid request, missing/disagreeing key or rejected oversell.
         '409':
           description: Idempotency key payload conflict or insufficient local cash.
+        '413': { description: Request body exceeds 16384 bytes. }
   /v1/portfolios/{id}/summary:
     get:
       operationId: getPortfolioSummary
@@ -123,6 +158,7 @@ paths:
         '201': { description: Accounting trade accepted or same-payload replay; original position snapshot returned. }
         '400': { description: Invalid request, missing/disagreeing key or rejected oversell. }
         '409': { description: Insufficient cash or key reused with a different portfolio, symbol, currency, side, quantity or price. }
+        '413': { description: Request body exceeds 16384 bytes. }
   /v1/portfolios/{id}/cash:
     get:
       operationId: getCashBalance
@@ -138,6 +174,7 @@ paths:
   /v1/portfolios/{id}/cash/fund:
     post:
       operationId: fundCash
+      description: Local cash simulation only; external payment configuration is rejected at startup.
       parameters:
         - { $ref: '#/components/parameters/PortfolioId' }
         - { $ref: '#/components/parameters/IdempotencyKey' }
@@ -147,13 +184,15 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/CashMovement' }
       responses:
-        '200': { description: Funding accepted; returns local balance. }
+        '200': { description: Funding accepted; returns original balance result on replay. }
         '400': { description: Invalid request. }
+        '413': { description: Request body exceeds 16384 bytes. }
         '409': { description: Idempotency conflict or insufficient cash. }
         '503': { description: Payment-backed cash boundary configured without safe recovery support; no transfer attempted. }
   /v1/portfolios/{id}/cash/withdraw:
     post:
       operationId: withdrawCash
+      description: Local cash simulation only; insufficient funds cannot debit balance.
       parameters:
         - { $ref: '#/components/parameters/PortfolioId' }
         - { $ref: '#/components/parameters/IdempotencyKey' }
@@ -163,8 +202,9 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/CashMovement' }
       responses:
-        '200': { description: Withdrawal accepted; returns local balance. }
+        '200': { description: Withdrawal accepted; returns original balance result on replay. }
         '400': { description: Invalid request. }
+        '413': { description: Request body exceeds 16384 bytes. }
         '409': { description: Idempotency conflict or insufficient cash. }
         '503': { description: Payment-backed cash boundary configured without safe recovery support; no transfer attempted. }
 components:
@@ -199,6 +239,17 @@ components:
         type: string
         format: uuid
   schemas:
+    Error:
+      type: object
+      required: [error, request_id]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+        request_id: { type: string, format: uuid }
     TradeRequest:
       type: object
       required: [symbol, side, quantity, price, currency]

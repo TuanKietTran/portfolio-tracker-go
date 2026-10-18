@@ -1,31 +1,56 @@
 package main
 
 import (
-	"log"
+	"context"
+	"errors"
+	"log/slog"
+	"net"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/TuanKietTran/portfolio-tracker-go/internal/api"
 	"github.com/TuanKietTran/portfolio-tracker-go/internal/command"
 	"github.com/TuanKietTran/portfolio-tracker-go/internal/repository"
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	"github.com/TuanKietTran/portfolio-tracker-go/internal/server"
 )
 
 func main() {
-	state := repository.NewInMemoryState()
-	prices := repository.NewStaticPriceFeed()
-	portfolioService, err := command.NewPortfolioService(state, prices, nil, "FIFO")
-	if err != nil {
-		log.Fatal(err)
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := run(ctx, os.Getenv, logger); err != nil {
+		logger.Error("server stopped", "error", err)
+		os.Exit(1)
 	}
-	log.Println("Portfolio API (in-memory) listening on :8105")
-	log.Fatal(http.ListenAndServe(":8105", newRouter(portfolioService)))
 }
 
+func run(ctx context.Context, getenv func(string) string, logger *slog.Logger) error {
+	config, err := server.LoadConfig(getenv)
+	if err != nil {
+		return err
+	}
+	state := repository.NewInMemoryState()
+	prices := repository.NewStaticPriceFeed()
+	service, err := command.NewPortfolioService(state, prices, nil, config.CostMethod)
+	if err != nil {
+		return err
+	}
+	listener, err := net.Listen("tcp", config.HTTPAddr)
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+	logger.Info("portfolio API listening", "address", listener.Addr().String(), "cash_mode", config.CashMode, "store", "memory", "cost_method", config.CostMethod)
+	err = server.Serve(ctx, listener, api.NewRouter(service, logger, nil), config.ShutdownTimeout)
+	if errors.Is(err, context.Canceled) {
+		return nil
+	}
+	return err
+}
+
+// Kept as the production-router fixture for cross-route regression tests.
 func newRouter(service *command.PortfolioService) http.Handler {
-	r := chi.NewRouter()
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Mount("/v1", api.NewPortfolioHandlers(service).Routes())
-	return r
+	return api.NewRouter(service, slog.Default(), nil)
 }
