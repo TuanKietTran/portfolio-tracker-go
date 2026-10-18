@@ -18,6 +18,7 @@ var ErrIdempotencyConflict = errors.New("idempotency key payload conflict")
 type PortfolioState interface {
 	ApplyTrade(context.Context, uuid.UUID, string, domain.AccountingEvent, domain.CostMethod, string) (domain.AccountPosition, error)
 	GetAccountPosition(context.Context, uuid.UUID, string) (domain.AccountPosition, error)
+	ListAccountPositions(context.Context, uuid.UUID) (map[string]domain.AccountPosition, error)
 	CashBalance(context.Context, uuid.UUID, string) (decimal.Decimal, error)
 	MoveCash(context.Context, uuid.UUID, string, string, decimal.Decimal, string) (decimal.Decimal, error)
 	ApplySplit(context.Context, uuid.UUID, string, int64, int64) (domain.AccountPosition, error)
@@ -96,6 +97,18 @@ func (s *InMemoryState) GetAccountPosition(_ context.Context, portfolio uuid.UUI
 	defer s.mu.RUnlock()
 	p := s.positions[stateKey{portfolio, symbol}]
 	return p.Clone(), nil
+}
+
+func (s *InMemoryState) ListAccountPositions(_ context.Context, portfolio uuid.UUID) (map[string]domain.AccountPosition, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	positions := make(map[string]domain.AccountPosition)
+	for key, p := range s.positions {
+		if key.portfolio == portfolio {
+			positions[key.symbol] = p.Clone()
+		}
+	}
+	return positions, nil
 }
 
 func (s *InMemoryState) CashBalance(_ context.Context, portfolio uuid.UUID, currency string) (decimal.Decimal, error) {

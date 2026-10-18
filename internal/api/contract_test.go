@@ -30,8 +30,8 @@ func TestOpenAPIParsesAndDeclaresImplementedRoutesAndStatuses(t *testing.T) {
 		t.Fatalf("parse OpenAPI: %v", err)
 	}
 	want := map[string]map[string][]string{
-		"/v1/portfolios/{id}/trades":                    {"post": {"201", "400"}},
-		"/v1/portfolios/{id}/summary":                   {"get": {"200", "400", "500"}},
+		"/v1/portfolios/{id}/trades":                    {"post": {"201", "400", "409"}},
+		"/v1/portfolios/{id}/summary":                   {"get": {"200", "400"}},
 		"/v1/portfolios/{id}/positions/{symbol}":        {"get": {"200", "400"}},
 		"/v1/portfolios/{id}/positions/{symbol}/trades": {"post": {"201", "400", "409"}},
 		"/v1/portfolios/{id}/cash":                      {"get": {"200", "400"}},
@@ -41,8 +41,25 @@ func TestOpenAPIParsesAndDeclaresImplementedRoutesAndStatuses(t *testing.T) {
 	if len(spec.Paths) != len(want) {
 		t.Fatalf("OpenAPI paths=%d want=%d", len(spec.Paths), len(want))
 	}
+	service, err := command.NewPortfolioService(repository.NewInMemoryState(), repository.NewStaticPriceFeed(), nil, domain.FIFO)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := chi.NewRouter()
+	router.Mount("/v1", NewPortfolioHandlers(service).Routes())
+	implemented := map[string]bool{}
+	if err := chi.Walk(router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		implemented[strings.ToLower(method)+" "+route] = true
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	for path, methods := range want {
 		for method, statuses := range methods {
+			if !implemented[method+" "+path] {
+				t.Errorf("contract route not registered: %s %s", method, path)
+			}
+			delete(implemented, method+" "+path)
 			operation, ok := spec.Paths[path][method]
 			if !ok {
 				t.Errorf("missing %s %s", method, path)
@@ -54,6 +71,9 @@ func TestOpenAPIParsesAndDeclaresImplementedRoutesAndStatuses(t *testing.T) {
 				}
 			}
 		}
+	}
+	if len(implemented) != 0 {
+		t.Errorf("undocumented routes: %v", implemented)
 	}
 }
 

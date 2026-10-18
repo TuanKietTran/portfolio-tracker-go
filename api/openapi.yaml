@@ -3,8 +3,10 @@ info:
   title: Portfolio Tracker API
   version: 1.0.0
   description: >-
-    Current implemented contract. Future portfolio, instrument, position, pricing,
-    cash and corporate-action routes are not yet published as callable operations.
+    Current production-router contract. Trades and summary share accounting state.
+    Cash remains a local simulation; trades do not yet debit cash. Instrument,
+    pricing management, corporate-action and returns routes are not yet callable.
+    The original in-process playback exercises a separate legacy compatibility adapter.
 servers:
   - url: http://localhost:8105
 paths:
@@ -12,8 +14,15 @@ paths:
     post:
       operationId: recordTrade
       summary: Record a portfolio trade
+      description: >-
+        Same accounting store and replay rules as the position-specific trade route.
+        BUY or SELL only; oversells and missing keys are rejected. Same-payload
+        replay returns 201 without another effect. Currency/cash linkage remains pending.
       parameters:
         - $ref: '#/components/parameters/PortfolioId'
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string, minLength: 1 }
       requestBody:
         required: true
         content:
@@ -24,24 +33,27 @@ paths:
         '201':
           description: Trade accepted; response body is empty.
         '400':
-          description: Invalid portfolio UUID, malformed JSON, or repository/domain error.
+          description: Invalid request, missing/disagreeing key or rejected oversell.
+        '409':
+          description: Idempotency key payload conflict.
   /v1/portfolios/{id}/summary:
     get:
       operationId: getPortfolioSummary
-      summary: Get portfolio summary
+      summary: Get marked portfolio summary from the shared holdings snapshot
       parameters:
         - $ref: '#/components/parameters/PortfolioId'
+        - $ref: '#/components/parameters/ValuationCurrency'
+        - $ref: '#/components/parameters/ValuationAsOf'
+        - $ref: '#/components/parameters/ValuationMaxAge'
       responses:
         '200':
-          description: Portfolio positions and currently-zero market figures.
+          description: Symbol-sorted positions and actual marked totals. Existing PascalCase response fields retained.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/PortfolioSummary'
         '400':
-          description: Invalid portfolio UUID.
-        '500':
-          description: Query failure.
+          description: Invalid UUID/query/currency, unavailable price, stale price or query failure.
   /v1/portfolios/{id}/positions/{symbol}:
     get:
       operationId: getPositionValuation
@@ -76,7 +88,7 @@ paths:
     post:
       operationId: recordAccountingTrade
       description: >-
-        In-memory accounting path, separate from the legacy trades/summary store.
+        In-memory accounting path, sharing the production trades/summary store.
         A nonempty Idempotency-Key header or idempotency_key body field is required;
         if both are supplied they must match. Replays return the original position
         snapshot without another effect. Keys are global to this accounting trade store.
@@ -145,6 +157,23 @@ paths:
         '409': { description: Idempotency conflict or insufficient cash. }
 components:
   parameters:
+    ValuationCurrency:
+      name: currency
+      in: query
+      required: true
+      schema: { type: string, minLength: 3, maxLength: 3 }
+    ValuationAsOf:
+      name: as_of
+      in: query
+      required: true
+      description: Positive Unix seconds defining valuation cutoff.
+      schema: { type: integer, format: int64, minimum: 1 }
+    ValuationMaxAge:
+      name: max_age
+      in: query
+      required: true
+      description: Non-negative maximum accepted price age in seconds.
+      schema: { type: integer, format: int64, minimum: 0 }
     PortfolioId:
       name: id
       in: path
@@ -159,10 +188,10 @@ components:
       required: [symbol, side, quantity, price]
       properties:
         symbol: { type: string }
-        side: { type: string, description: Legacy behavior accepts any side; BUY and SELL update positions. }
+        side: { type: string, enum: [BUY, SELL] }
         quantity: { type: string, example: '2.5', description: Decimal quantity encoded as a JSON decimal string. }
         price: { type: string, example: '10.25', description: Decimal price encoded as a JSON decimal string. }
-        idempotency_key: { type: string, description: Optional legacy key; repeated keys return 400. }
+        idempotency_key: { type: string, minLength: 1, description: Required unless Idempotency-Key header is supplied; both must agree. }
     Position:
       type: object
       properties:
@@ -170,6 +199,10 @@ components:
         Quantity: { type: string }
         AverageCost: { type: string }
         RealizedPnL: { type: string }
+        CostBasis: { type: string }
+        MarketValue: { type: string }
+        UnrealizedPnL: { type: string }
+        PriceAsOf: { type: integer, format: int64 }
     PositionValuation:
       type: object
       required: [symbol, quantity, cost_basis, realized_pnl, market_value, unrealized_pnl, currency, price_as_of]
@@ -192,8 +225,10 @@ components:
     PortfolioSummary:
       type: object
       properties:
-        TotalValue: { type: string, example: '0' }
-        UnrealizedPnL: { type: string, example: '0' }
+        Currency: { type: string }
+        AsOf: { type: integer, format: int64 }
+        TotalValue: { type: string, example: '30' }
+        UnrealizedPnL: { type: string, example: '10' }
         Positions:
           type: array
           items: { $ref: '#/components/schemas/Position' }

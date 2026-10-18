@@ -21,6 +21,8 @@ func NewPortfolioHandlers(service *command.PortfolioService) *PortfolioHandlers 
 }
 func (h *PortfolioHandlers) Routes() chi.Router {
 	r := chi.NewRouter()
+	r.Post("/portfolios/{id}/trades", h.trade)
+	r.Get("/portfolios/{id}/summary", h.summary)
 	r.Get("/portfolios/{id}/positions/{symbol}", h.position)
 	r.Post("/portfolios/{id}/positions/{symbol}/trades", h.trade)
 	r.Get("/portfolios/{id}/cash", h.cash)
@@ -55,8 +57,11 @@ func (h *PortfolioHandlers) position(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	currency := r.URL.Query().Get("currency")
-	asOf, _ := strconv.ParseInt(r.URL.Query().Get("as_of"), 10, 64)
-	maxAge, _ := strconv.ParseInt(r.URL.Query().Get("max_age"), 10, 64)
+	asOf, maxAge, err := valuationTimes(r)
+	if err != nil {
+		writePortfolioError(w, err)
+		return
+	}
 	p, v, err := h.service.Position(r.Context(), id, chi.URLParam(r, "symbol"), currency, asOf, maxAge)
 	if err != nil {
 		writePortfolioError(w, err)
@@ -84,7 +89,40 @@ func (h *PortfolioHandlers) cash(w http.ResponseWriter, r *http.Request) {
 	}{currency, balance.String()})
 }
 
+func valuationTimes(r *http.Request) (int64, int64, error) {
+	asOf, err := strconv.ParseInt(r.URL.Query().Get("as_of"), 10, 64)
+	if err != nil || asOf <= 0 {
+		return 0, 0, errors.New("positive integer as_of required")
+	}
+	maxAge, err := strconv.ParseInt(r.URL.Query().Get("max_age"), 10, 64)
+	if err != nil || maxAge < 0 {
+		return 0, 0, errors.New("non-negative integer max_age required")
+	}
+	return asOf, maxAge, nil
+}
+
+func (h *PortfolioHandlers) summary(w http.ResponseWriter, r *http.Request) {
+	id, err := portfolioID(r)
+	if err != nil {
+		writePortfolioError(w, err)
+		return
+	}
+	asOf, maxAge, err := valuationTimes(r)
+	if err != nil {
+		writePortfolioError(w, err)
+		return
+	}
+	summary, err := h.service.Summary(r.Context(), id, r.URL.Query().Get("currency"), asOf, maxAge)
+	if err != nil {
+		writePortfolioError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(summary)
+}
+
 type accountingTradeRequest struct {
+	Symbol         string          `json:"symbol"`
 	Side           string          `json:"side"`
 	Quantity       decimal.Decimal `json:"quantity"`
 	Price          decimal.Decimal `json:"price"`
@@ -115,14 +153,25 @@ func (h *PortfolioHandlers) trade(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "side must be BUY or SELL", 400)
 		return
 	}
-	p, err := h.service.Trade(r.Context(), id, chi.URLParam(r, "symbol"), domain.AccountingEvent{Kind: kind, Quantity: req.Quantity, UnitPrice: req.Price}, key)
+	symbol := chi.URLParam(r, "symbol")
+	legacyPath := symbol == ""
+	if legacyPath {
+		symbol = req.Symbol
+	}
+	if !legacyPath && req.Symbol != "" && req.Symbol != symbol {
+		writePortfolioError(w, errors.New("body symbol and path disagree"))
+		return
+	}
+	p, err := h.service.Trade(r.Context(), id, symbol, domain.AccountingEvent{Kind: kind, Quantity: req.Quantity, UnitPrice: req.Price}, key)
 	if err != nil {
 		writePortfolioError(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(p)
+	if !legacyPath {
+		_ = json.NewEncoder(w).Encode(p)
+	}
 }
 
 type cashRequest struct {

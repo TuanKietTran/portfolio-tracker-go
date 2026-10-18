@@ -1,6 +1,6 @@
 # Portfolio tracker
 
-CQRS portfolio. Callers record trades and read positions. Average cost and realized P&L are updated on the trade. Summary market value and unrealized P&L are always zero.
+CQRS portfolio simulation. Production named/position trades share exact FIFO accounting state, and explicit as-of summary queries compute marked security value and P&L. The older adapter and playback are retained as historical regression fixtures, not server wiring. Cash remains local and is not yet linked to trades or external payments.
 
 ## Stack
 
@@ -18,6 +18,8 @@ Go 1.22, Chi, `shopspring/decimal`, Google UUID. In-memory only.
 | 2026-10-17 | Baseline spec recorded from the shipped service | `08b5e3c`. No handler tests and no Postgres repository yet. |
 | 2026-10-17 | 1000 requests in one minute, retry, playback, coverage | `internal/playback`. 1000 keyed buys plus one 503 retry each finished in 78ms. Replay did not change quantity. A missing key still applies every post. Statement coverage 67.4%. |
 | 2026-10-17 | Definition of done and playback storyboard | `openspec/dod.md` and `openspec/gifs/playback-flow.gif`. GIF review: retry stays at the pre-write state, playback shows the unchanged result. |
+| 2026-10-18 | Accounting trade replay and independent lot snapshots | `e3c0cd9`; `go test -p 2 ./... -race -count=1 -cover`; domain 92.5%, weighted non-cmd 64.52%. |
+| 2026-10-18 | Unified runtime trades/summary and marked totals | Commit recorded in STATUS; `go test -p 2 ./... -race -count=1 -coverprofile=<ctl logs>/unified-runtime.cover -cover`; domain 92.5%, weighted non-cmd 319/502 = 63.55%. `TestRuntimeRouterSharesTradePositionAndMarkedSummary` exercises actual server router. |
 
 ### 2026-10-18 accounting trade replay checkpoint
 
@@ -25,8 +27,8 @@ The `/positions/{symbol}/trades` route now requires a key and returns the origin
 
 ## Out of scope until implemented
 
-- `GetPositions` over HTTP. Positions are nested in the summary.
-- Mark-to-market `TotalValue` and `UnrealizedPnL`. Both are fixed at 0.
+- Cash-inclusive NAV, cash-linked trades, instrument/price management over HTTP.
+- External payment-backed funding and durable persistence.
 - A portfolio row. Any UUID is accepted. `migrations/001_init.sql` is not used by the server.
 
 ## Definition of done

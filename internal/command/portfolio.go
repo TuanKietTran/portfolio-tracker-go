@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"errors"
+	"sort"
 
 	"github.com/TuanKietTran/portfolio-tracker-go/internal/domain"
 	"github.com/TuanKietTran/portfolio-tracker-go/internal/repository"
@@ -60,6 +61,66 @@ func (s *PortfolioService) Position(ctx context.Context, portfolio uuid.UUID, sy
 	}
 	v, err := domain.ValuePosition(p, symbol, currency, price, asOf, maxAge)
 	return p, v, err
+}
+
+type SummaryPosition struct {
+	Symbol        string
+	Quantity      decimal.Decimal
+	AverageCost   decimal.Decimal
+	CostBasis     decimal.Decimal
+	RealizedPnL   decimal.Decimal
+	MarketValue   decimal.Decimal
+	UnrealizedPnL decimal.Decimal
+	PriceAsOf     int64
+}
+
+type PortfolioSummary struct {
+	Currency      string
+	AsOf          int64
+	TotalValue    decimal.Decimal
+	UnrealizedPnL decimal.Decimal
+	Positions     []SummaryPosition
+}
+
+// Summary values one consistent holdings snapshot with explicit as-of marks.
+// Missing/stale prices fail the entire query; zero placeholder marks are never used.
+func (s *PortfolioService) Summary(ctx context.Context, portfolio uuid.UUID, currency string, asOf, maxAge int64) (PortfolioSummary, error) {
+	money, err := domain.NewMoney(decimal.Zero, currency)
+	if err != nil {
+		return PortfolioSummary{}, err
+	}
+	if asOf <= 0 || maxAge < 0 {
+		return PortfolioSummary{}, errors.New("positive as_of and non-negative max_age required")
+	}
+	positions, err := s.state.ListAccountPositions(ctx, portfolio)
+	if err != nil {
+		return PortfolioSummary{}, err
+	}
+	symbols := make([]string, 0, len(positions))
+	for symbol := range positions {
+		symbols = append(symbols, symbol)
+	}
+	sort.Strings(symbols)
+	result := PortfolioSummary{Currency: money.Currency, AsOf: asOf, Positions: []SummaryPosition{}}
+	for _, symbol := range symbols {
+		p := positions[symbol]
+		price, err := s.prices.Price(ctx, symbol, money.Currency)
+		if err != nil {
+			return PortfolioSummary{}, err
+		}
+		v, err := domain.ValuePosition(p, symbol, money.Currency, price, asOf, maxAge)
+		if err != nil {
+			return PortfolioSummary{}, err
+		}
+		average := decimal.Zero
+		if p.Quantity.IsPositive() {
+			average = p.CostBasis.Div(p.Quantity)
+		}
+		result.Positions = append(result.Positions, SummaryPosition{Symbol: symbol, Quantity: p.Quantity, AverageCost: average, CostBasis: p.CostBasis, RealizedPnL: p.RealizedPnL, MarketValue: v.MarketValue, UnrealizedPnL: v.UnrealizedPnL, PriceAsOf: v.AsOf})
+		result.TotalValue = result.TotalValue.Add(v.MarketValue)
+		result.UnrealizedPnL = result.UnrealizedPnL.Add(v.UnrealizedPnL)
+	}
+	return result, nil
 }
 
 func (s *PortfolioService) Cash(ctx context.Context, portfolio uuid.UUID, currency string) (decimal.Decimal, error) {
