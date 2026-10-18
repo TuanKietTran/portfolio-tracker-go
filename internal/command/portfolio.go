@@ -58,7 +58,7 @@ func (s *PortfolioService) Position(ctx context.Context, portfolio uuid.UUID, sy
 	if err != nil {
 		return domain.AccountPosition{}, domain.PositionValuation{}, err
 	}
-	price, err := s.prices.Price(ctx, symbol, currency)
+	price, err := s.priceAt(ctx, symbol, currency, asOf)
 	if err != nil {
 		return domain.AccountPosition{}, domain.PositionValuation{}, err
 	}
@@ -107,7 +107,7 @@ func (s *PortfolioService) Summary(ctx context.Context, portfolio uuid.UUID, cur
 	result := PortfolioSummary{Currency: money.Currency, AsOf: asOf, Positions: []SummaryPosition{}}
 	for _, symbol := range symbols {
 		p := positions[symbol]
-		price, err := s.prices.Price(ctx, symbol, money.Currency)
+		price, err := s.priceAt(ctx, symbol, money.Currency, asOf)
 		if err != nil {
 			return PortfolioSummary{}, err
 		}

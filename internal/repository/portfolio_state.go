@@ -16,6 +16,8 @@ var ErrIdempotencyConflict = errors.New("idempotency key payload conflict")
 
 // PortfolioState is the atomic persistence boundary for positions and portfolio cash.
 type PortfolioState interface {
+	RegisterInstrument(context.Context, domain.Instrument, string) (domain.Instrument, error)
+	GetInstrument(context.Context, string) (domain.Instrument, error)
 	ApplyTrade(context.Context, uuid.UUID, string, domain.AccountingEvent, domain.CostMethod, string) (domain.AccountPosition, error)
 	GetAccountPosition(context.Context, uuid.UUID, string) (domain.AccountPosition, error)
 	ListAccountPositions(context.Context, uuid.UUID) (map[string]domain.AccountPosition, error)
@@ -61,18 +63,22 @@ type InMemoryState struct {
 	cashKeys             map[string]cashCommand
 	tradeKeys            map[string]tradeCommand
 	instrumentCurrencies map[string]string
+	instrumentKeys       map[string]domain.Instrument
 }
 
 func NewInMemoryState() *InMemoryState {
-	return &InMemoryState{positions: map[stateKey]domain.AccountPosition{}, cash: map[cashKey]decimal.Decimal{}, cashKeys: map[string]cashCommand{}, tradeKeys: map[string]tradeCommand{}, instrumentCurrencies: map[string]string{}}
+	return &InMemoryState{positions: map[stateKey]domain.AccountPosition{}, cash: map[cashKey]decimal.Decimal{}, cashKeys: map[string]cashCommand{}, tradeKeys: map[string]tradeCommand{}, instrumentCurrencies: map[string]string{}, instrumentKeys: map[string]domain.Instrument{}}
 }
 
 func (s *InMemoryState) ApplyTrade(_ context.Context, portfolio uuid.UUID, symbol string, event domain.AccountingEvent, method domain.CostMethod, idempotencyKey string) (domain.AccountPosition, error) {
 	if idempotencyKey == "" {
 		return domain.AccountPosition{}, errors.New("idempotency key required")
 	}
-	if portfolio == uuid.Nil || symbol == "" {
-		return domain.AccountPosition{}, errors.New("portfolio and symbol required")
+	if portfolio == uuid.Nil {
+		return domain.AccountPosition{}, errors.New("portfolio required")
+	}
+	if err := (domain.Instrument{Symbol: symbol, Currency: event.Currency}).Validate(); err != nil {
+		return domain.AccountPosition{}, err
 	}
 	for _, value := range []decimal.Decimal{event.Quantity, event.UnitPrice, event.Amount} {
 		if err := domain.ValidateDecimalPrecision(value); err != nil {

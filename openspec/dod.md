@@ -12,12 +12,13 @@ Met means implemented and asserted by named tests. This is a synthetic local-mem
 | Local settlement has explicit currency, precision and minor-unit rules | `TestCashAndTradeRejectUnsupportedCurrencyAndFractionalMinorUnits`, `TestRejectFractionalMinorUnitsPolicy` |
 | FIFO/average basis survives repeating splits/allocations and full sale | `TestPartialAllocationsCarryResidualUntilFinalSale`, `TestAverageFullLiquidationConsumesExactRemainingBasis` |
 | Positions require valid as-of price marks instead of zero placeholders | `TestSummaryDeterministicSortedMarkedSnapshot`, `TestPortfolioServiceTradesValuationAndLocalCash` |
+| Keyed immutable instruments and historical marks with explicit cutoffs | `TestInstrumentAndPriceReplayImmutableHistoryAndConcurrency`, `TestMarketHTTPManagementAndHistoricalPortfolioValuation`, `TestReadOnlyFeedCompatibilityAndPublicationUnavailable` |
 | Operational config rejects unsupported modes/adapters | `TestValidatedRuntimeConfiguration` |
 | Health/readiness/metrics, request IDs, uniform errors and panic recovery | `TestOperationalRequestsRecoveryReadinessAndMetrics` |
 | Mutation bodies are bounded and reject unknown/trailing JSON | `TestStrictBoundedBodiesAndUniformErrors` |
 | Shutdown drains active work or forces bounded closure | `TestServeCancellationDrainsActiveRequest`, `TestServeErrorsAndForcedShutdown`; repeated race count10 passed |
 | Parsed OpenAPI paths/statuses match registered runtime routes | `TestOpenAPIParsesAndDeclaresImplementedRoutesAndStatuses` |
-| Domain >=90% and aggregate non-cmd >=80% statement coverage | 2026-10-18 macOS arm64 Go1.27.1: domain94.9%; `go test -p 2 ./... -race -count=1 -coverpkg=./... -coverprofile=coverage.out` aggregate630/715=88.11% unique non-cmd statements. Package-local instrumentation535/715=74.83%; not an unweighted mean. |
+| Domain >=90% and aggregate non-cmd >=80% statement coverage | 2026-10-18 macOS arm64 Go1.27.1: domain95.0%; `go test -p 2 ./... -race -count=1 -coverpkg=./... -coverprofile=coverage.out` aggregate770/859=89.64% unique non-cmd statements. Package-local instrumentation685/859=79.74%; not an unweighted mean. |
 
 ## Partial
 
@@ -25,7 +26,6 @@ Met means implemented and asserted by named tests. This is a synthetic local-mem
 | --- | --- |
 | Corporate actions | Pure split/dividend/fee accounting exists; no keyed corporate-action HTTP yet. |
 | Returns | Pure TWR and bounded MWR methods tested; no HTTP or stored investor cash-flow history. |
-| Instruments/prices | Pure instrument validation and deterministic injected feed exist; no registry/mark management API. Symbol currency binds on first successful trade. |
 | Documentation | README and two ADRs exist; full glossary/API examples/CI and milestone closure remain. |
 
 ## Unmet

@@ -8,10 +8,10 @@ import (
 )
 
 type Price struct {
-	Symbol   string
-	Currency string
-	Amount   decimal.Decimal
-	AsOf     int64
+	Symbol   string          `json:"symbol"`
+	Currency string          `json:"currency"`
+	Amount   decimal.Decimal `json:"amount"`
+	AsOf     int64           `json:"as_of"`
 }
 
 type PositionValuation struct {

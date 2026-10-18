@@ -22,6 +22,10 @@ func NewPortfolioHandlers(service *command.PortfolioService) *PortfolioHandlers 
 }
 func (h *PortfolioHandlers) Routes() chi.Router {
 	r := chi.NewRouter()
+	r.Post("/instruments", h.registerInstrument)
+	r.Get("/instruments/{symbol}", h.instrument)
+	r.Post("/prices", h.publishPrice)
+	r.Get("/prices/{symbol}", h.price)
 	r.Post("/portfolios/{id}/trades", h.trade)
 	r.Get("/portfolios/{id}/summary", h.summary)
 	r.Get("/portfolios/{id}/positions/{symbol}", h.position)
@@ -53,6 +57,14 @@ func portfolioID(r *http.Request) (uuid.UUID, error) {
 func writePortfolioError(w http.ResponseWriter, err error) {
 	status, code := 400, "invalid_request"
 	switch {
+	case errors.Is(err, repository.ErrNotFound):
+		status, code = 404, "not_found"
+	case errors.Is(err, command.ErrPriceManagementUnavailable):
+		status, code = 503, "price_management_unavailable"
+	case errors.Is(err, repository.ErrInstrumentConflict):
+		status, code = 409, "instrument_conflict"
+	case errors.Is(err, repository.ErrPriceConflict):
+		status, code = 409, "price_conflict"
 	case errors.Is(err, command.ErrPaymentCashUnavailable):
 		status, code = 503, "payment_unavailable"
 	case errors.Is(err, repository.ErrInsufficientCash):

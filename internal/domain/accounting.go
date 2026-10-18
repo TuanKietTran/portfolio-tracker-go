@@ -30,13 +30,18 @@ func (m Money) Add(other Money) (Money, error) {
 }
 
 type Instrument struct {
-	Symbol   string
-	Currency string
+	Symbol   string `json:"symbol"`
+	Currency string `json:"currency"`
 }
 
 func (i Instrument) Validate() error {
-	if strings.TrimSpace(i.Symbol) == "" {
-		return errors.New("symbol is required")
+	if len(i.Symbol) == 0 || len(i.Symbol) > 32 {
+		return errors.New("symbol must contain 1 through 32 ASCII letters, digits, dot, underscore or hyphen")
+	}
+	for _, c := range i.Symbol {
+		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '-') {
+			return errors.New("invalid instrument symbol")
+		}
 	}
 	_, err := NewMoney(decimal.Zero, i.Currency)
 	return err

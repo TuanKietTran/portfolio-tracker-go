@@ -5,7 +5,11 @@ info:
   description: >-
     Current production-router contract. Trades and summary share accounting state.
     Cash remains a local simulation; trades atomically update holdings and cash.
-    Instrument/pricing management, corporate-action and returns routes are not yet callable.
+    Keyed instrument and deterministic historical-price management are callable.
+    Position and summary holdings are current snapshots; as_of selects historical
+    price marks only, not historical holdings or trade-event replay. FX conversion
+    and cross-currency aggregation are not implemented.
+    Corporate-action and returns routes are not yet callable.
     The original in-process playback exercises a separate legacy compatibility adapter.
     All production responses include X-Request-ID. Errors use the Error schema;
     common runtime errors are 404 (route), 405 (method) and 500 (panic before response).
@@ -17,6 +21,77 @@ info:
 servers:
   - url: http://localhost:8105
 paths:
+  /v1/instruments:
+    post:
+      operationId: registerInstrument
+      description: >-
+        Symbol denomination is immutable. A successful trade still auto-registers its
+        symbol for backward compatibility. Symbols are case-sensitive, 1..32 ASCII
+        letters/digits/dot/underscore/hyphen. Same key/payload replays original result;
+        new keys with the same existing denomination are accepted without another resource.
+        Instrument keys are global within this registry, separate from cash/trade/price keys.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InstrumentRegistration' }
+      responses:
+        '201': { description: Instrument registered or replayed. }
+        '400': { description: Invalid symbol/currency/key/JSON. }
+        '409': { description: Key payload conflict or attempted denomination change. }
+        '413': { description: Body exceeds 16384 bytes. }
+  /v1/instruments/{symbol}:
+    get:
+      operationId: getInstrument
+      parameters: [{ $ref: '#/components/parameters/MarketSymbol' }]
+      responses:
+        '200':
+          description: Registered or trade-auto-bound instrument.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Instrument' }
+        '404': { description: Unknown symbol. }
+  /v1/prices:
+    post:
+      operationId: publishPrice
+      description: >-
+        Publish an injected simulated mark for a registered instrument. The tuple
+        (symbol,currency,as_of) is immutable. Out-of-order historical insertion is
+        allowed; it does not replace newer marks. Price keys are global within the
+        feed. Same key and semantic decimal payload returns the original result.
+        Amount is nonnegative with bounded decimal precision; unlike cash, price
+        marks may have fractional minor units. History is lost on process restart.
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PricePublication' }
+      responses:
+        '201': { description: Mark published or original result replayed. }
+        '400': { description: Invalid mark/key/JSON. }
+        '404': { description: Instrument not registered. }
+        '409': { description: Key conflict, denomination mismatch or changed mark at existing timestamp. }
+        '413': { description: Body exceeds 16384 bytes. }
+        '503': { description: Injected feed does not support management. }
+  /v1/prices/{symbol}:
+    get:
+      operationId: getHistoricalPrice
+      description: Latest mark at or before as_of, with max_age enforced; never uses a future mark. The same historical selection is used by position and summary queries.
+      parameters:
+        - { $ref: '#/components/parameters/MarketSymbol' }
+        - { $ref: '#/components/parameters/ValuationCurrency' }
+        - { $ref: '#/components/parameters/ValuationAsOf' }
+        - { $ref: '#/components/parameters/ValuationMaxAge' }
+      responses:
+        '200':
+          description: Selected historical mark.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Price' }
+        '400': { description: Invalid query/currency or stale mark. }
+        '404': { description: Unknown instrument or no mark at/before cutoff. }
   /healthz:
     get:
       operationId: health
@@ -209,6 +284,11 @@ paths:
         '503': { description: Payment-backed cash boundary configured without safe recovery support; no transfer attempted. }
 components:
   parameters:
+    MarketSymbol:
+      name: symbol
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 32, pattern: '^[A-Za-z0-9._-]+$' }
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -239,6 +319,36 @@ components:
         type: string
         format: uuid
   schemas:
+    Instrument:
+      type: object
+      required: [symbol, currency]
+      properties:
+        symbol: { type: string, minLength: 1, maxLength: 32, pattern: '^[A-Za-z0-9._-]+$' }
+        currency: { type: string, enum: [USD, EUR, GBP, JPY] }
+    InstrumentRegistration:
+      type: object
+      required: [symbol, currency]
+      properties:
+        symbol: { type: string, minLength: 1, maxLength: 32, pattern: '^[A-Za-z0-9._-]+$' }
+        currency: { type: string, enum: [USD, EUR, GBP, JPY] }
+        idempotency_key: { type: string, minLength: 1, maxLength: 200 }
+    Price:
+      type: object
+      required: [symbol, currency, amount, as_of]
+      properties:
+        symbol: { type: string }
+        currency: { type: string, enum: [USD, EUR, GBP, JPY] }
+        amount: { type: string, example: '10.001' }
+        as_of: { type: integer, format: int64, minimum: 1 }
+    PricePublication:
+      type: object
+      required: [symbol, currency, amount, as_of]
+      properties:
+        symbol: { type: string }
+        currency: { type: string, enum: [USD, EUR, GBP, JPY] }
+        amount: { type: string, example: '10.001' }
+        as_of: { type: integer, format: int64, minimum: 1 }
+        idempotency_key: { type: string, minLength: 1, maxLength: 200 }
     Error:
       type: object
       required: [error, request_id]

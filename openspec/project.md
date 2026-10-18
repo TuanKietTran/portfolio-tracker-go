@@ -25,9 +25,13 @@ Go module1.22; native verification Go1.27.1 macOS arm64. Chi, `shopspring/decima
 
 The `/positions/{symbol}/trades` route now requires a key and returns the original snapshot on replay; changed payloads return 409. Its store is still separate from legacy trades/summary. `TestAccountingTradeHTTPReplayConflictAndRequiredKey`, `TestConcurrentTradeReplayAppliesOnce` and `TestAccountingEventsDoNotMutateInputLots` prove the bounded change. On macOS arm64 Go 1.27.1, `go test -p 2 ./... -race -count=1 -coverprofile=<ctl logs>/trade-replay.cover -cover` passed; domain 92.5%, weighted non-cmd 280/434 = 64.52%. Build, vet, empty gofmt and module tidy gates passed. Exact commit is recorded in the append-only lane STATUS (this checkpoint is part of that commit).
 
+### 2026-10-18 market-management checkpoint
+
+Commit recorded in append-only STATUS. `go build ./...`, `go vet ./...`, empty `gofmt -l .`, race tests with default and cross-package coverage, tidy with no module diff and diff check passed on Go1.27.1 macOS arm64. Domain95.0%; weighted unique non-cmd770/859=89.64% with `go test -p 2 ./... -race -count=1 -coverpkg=./... -coverprofile=<ctl logs>/market-all.cover`; default package-local685/859=79.74%. `GOMAXPROCS=2 go test ./internal/domain -run='^$' -fuzz=FuzzInstrumentSymbol -fuzztime=3s` passed165954 executions. Full evidence ctl `market-gates.log`. Immutable registry/marks,100-way duplicate concurrency and actual-router historical summary assertions are named in DOD. State remains memory-only.
+
 ### 2026-10-18 operational runtime checkpoint
 
-Commit recorded in STATUS. `go build ./...`, `go vet ./...`, empty `gofmt -l .`, race tests with default and `-coverpkg=./...` profiles, tidy with no module diff and diff check passed. Domain94.9%, server95.5%; aggregate unique non-cmd630/715=88.11%, package-local535/715=74.83%. Full evidence `ctl/logs/portfolio/operations-gates.log`. `go test ./internal/server -race -count=10` passed; lifecycle tests use channel synchronization. Native compiled process on127.0.0.1:8105 with AVERAGE_COST returned200 for readiness/health/metrics and exited0 on SIGTERM; process structured logs in ctl `operations-process.log`. No external cash/persistence/integration claim.
+`a56180c`. `go build ./...`, `go vet ./...`, empty `gofmt -l .`, race tests with default and `-coverpkg=./...` profiles, tidy with no module diff and diff check passed. Domain94.9%, server95.5%; aggregate unique non-cmd630/715=88.11%, package-local535/715=74.83%. Full evidence `ctl/logs/portfolio/operations-gates.log`. `go test ./internal/server -race -count=10` passed; lifecycle tests use channel synchronization. Native compiled process on127.0.0.1:8105 with AVERAGE_COST returned200 for readiness/health/metrics and exited0 on SIGTERM; process structured logs in ctl `operations-process.log`. No external cash/persistence/integration claim.
 
 ### 2026-10-18 exact residual-basis checkpoint
 
@@ -39,7 +43,7 @@ Commit recorded in STATUS. `go build ./...`, `go vet ./...`, empty `gofmt -l .`,
 
 ## Out of scope until implemented
 
-- Cash-inclusive NAV, instrument/price management over HTTP.
+- Cash-inclusive NAV, portfolio lifecycle and corporate/returns HTTP.
 - External payment-backed funding and durable persistence.
 - A portfolio row. Any UUID is accepted. `migrations/001_init.sql` is not used by the server.
 
