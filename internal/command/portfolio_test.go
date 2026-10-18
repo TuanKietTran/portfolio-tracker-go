@@ -21,7 +21,10 @@ func TestPortfolioServiceTradesValuationAndLocalCash(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := uuid.New()
-	if _, err = svc.Trade(ctx, id, "ACME", domain.AccountingEvent{Kind: domain.Buy, Quantity: cd("2"), UnitPrice: cd("10")}, "buy-1"); err != nil {
+	if _, err = svc.MoveCash(ctx, id, "USD", "FUND", cd("20"), "seed"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc.Trade(ctx, id, "ACME", domain.AccountingEvent{Currency: "USD", Kind: domain.Buy, Quantity: cd("2"), UnitPrice: cd("10")}, "buy-1"); err != nil {
 		t.Fatal(err)
 	}
 	p, v, err := svc.Position(ctx, id, "ACME", "USD", 55, 5)

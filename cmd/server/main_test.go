@@ -30,7 +30,10 @@ func TestRuntimeRouterSharesTradePositionAndMarkedSummary(t *testing.T) {
 		router.ServeHTTP(w, httptest.NewRequest(method, base+path, strings.NewReader(body)))
 		return w
 	}
-	buy := `{"symbol":"ACME","side":"BUY","quantity":"2","price":"10","idempotency_key":"buy"}`
+	if w := send("POST", "/cash/fund", `{"currency":"USD","amount":"100","idempotency_key":"seed"}`); w.Code != 200 {
+		t.Fatalf("fund=%d %s", w.Code, w.Body)
+	}
+	buy := `{"currency":"USD","symbol":"ACME","side":"BUY","quantity":"2","price":"10","idempotency_key":"buy"}`
 	for i := 0; i < 2; i++ {
 		w := send("POST", "/trades", buy)
 		if w.Code != 201 || w.Body.Len() != 0 {
@@ -46,7 +49,7 @@ func TestRuntimeRouterSharesTradePositionAndMarkedSummary(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &summary); err != nil || w.Code != 200 || !summary.TotalValue.Equal(decimal.NewFromInt(30)) || !summary.UnrealizedPnL.Equal(decimal.NewFromInt(10)) || len(summary.Positions) != 1 {
 		t.Fatalf("summary=%d %s err=%v", w.Code, w.Body, err)
 	}
-	sell := `{"side":"SELL","quantity":"1","price":"16","idempotency_key":"sell"}`
+	sell := `{"currency":"USD","side":"SELL","quantity":"1","price":"16","idempotency_key":"sell"}`
 	if w = send("POST", "/positions/ACME/trades", sell); w.Code != 201 {
 		t.Fatalf("sell=%d %s", w.Code, w.Body)
 	}
@@ -59,7 +62,7 @@ func TestRuntimeRouterSharesTradePositionAndMarkedSummary(t *testing.T) {
 			t.Fatalf("path=%s status=%d", path, w.Code)
 		}
 	}
-	for _, body := range []string{`{"symbol":"ACME","side":"BUY","quantity":"1","price":"10"}`, `{"symbol":"ACME","side":"OTHER","quantity":"1","price":"10","idempotency_key":"bad"}`, `{"symbol":"ACME","side":"SELL","quantity":"2","price":"10","idempotency_key":"oversell"}`} {
+	for _, body := range []string{`{"currency":"USD","symbol":"ACME","side":"BUY","quantity":"1","price":"10"}`, `{"currency":"USD","symbol":"ACME","side":"OTHER","quantity":"1","price":"10","idempotency_key":"bad"}`, `{"currency":"USD","symbol":"ACME","side":"SELL","quantity":"2","price":"10","idempotency_key":"oversell"}`} {
 		if w = send("POST", "/trades", body); w.Code != 400 {
 			t.Fatalf("invalid=%d %s", w.Code, w.Body)
 		}

@@ -36,6 +36,7 @@ type cashCommand struct {
 	portfolio           uuid.UUID
 	currency, direction string
 	amount              decimal.Decimal
+	result              decimal.Decimal
 }
 
 type tradeCommand struct {
@@ -48,21 +49,22 @@ type tradeCommand struct {
 
 func (c tradeCommand) matches(other tradeCommand) bool {
 	return c.portfolio == other.portfolio && c.symbol == other.symbol && c.method == other.method &&
-		c.event.Kind == other.event.Kind && c.event.Quantity.Equal(other.event.Quantity) &&
+		c.event.Kind == other.event.Kind && c.event.Currency == other.event.Currency && c.event.Quantity.Equal(other.event.Quantity) &&
 		c.event.UnitPrice.Equal(other.event.UnitPrice) && c.event.Amount.Equal(other.event.Amount)
 }
 
 // InMemoryState serializes position and cash changes. It is not durable across restarts.
 type InMemoryState struct {
-	mu        sync.RWMutex
-	positions map[stateKey]domain.AccountPosition
-	cash      map[cashKey]decimal.Decimal
-	cashKeys  map[string]cashCommand
-	tradeKeys map[string]tradeCommand
+	mu                   sync.RWMutex
+	positions            map[stateKey]domain.AccountPosition
+	cash                 map[cashKey]decimal.Decimal
+	cashKeys             map[string]cashCommand
+	tradeKeys            map[string]tradeCommand
+	instrumentCurrencies map[string]string
 }
 
 func NewInMemoryState() *InMemoryState {
-	return &InMemoryState{positions: map[stateKey]domain.AccountPosition{}, cash: map[cashKey]decimal.Decimal{}, cashKeys: map[string]cashCommand{}, tradeKeys: map[string]tradeCommand{}}
+	return &InMemoryState{positions: map[stateKey]domain.AccountPosition{}, cash: map[cashKey]decimal.Decimal{}, cashKeys: map[string]cashCommand{}, tradeKeys: map[string]tradeCommand{}, instrumentCurrencies: map[string]string{}}
 }
 
 func (s *InMemoryState) ApplyTrade(_ context.Context, portfolio uuid.UUID, symbol string, event domain.AccountingEvent, method domain.CostMethod, idempotencyKey string) (domain.AccountPosition, error) {
@@ -71,6 +73,11 @@ func (s *InMemoryState) ApplyTrade(_ context.Context, portfolio uuid.UUID, symbo
 	}
 	if portfolio == uuid.Nil || symbol == "" {
 		return domain.AccountPosition{}, errors.New("portfolio and symbol required")
+	}
+	for _, value := range []decimal.Decimal{event.Quantity, event.UnitPrice, event.Amount} {
+		if err := domain.ValidateDecimalPrecision(value); err != nil {
+			return domain.AccountPosition{}, err
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -81,11 +88,37 @@ func (s *InMemoryState) ApplyTrade(_ context.Context, portfolio uuid.UUID, symbo
 		}
 		return previous.result.Clone(), nil
 	}
+	if err := domain.ValidateCashAmount(decimal.Zero, event.Currency); err != nil {
+		return domain.AccountPosition{}, err
+	}
+	if currency, exists := s.instrumentCurrencies[symbol]; exists && currency != event.Currency {
+		return domain.AccountPosition{}, errors.New("instrument currency is immutable")
+	}
 	key := stateKey{portfolio, symbol}
 	updated, err := domain.ApplyEvent(s.positions[key], event, method)
 	if err != nil {
 		return domain.AccountPosition{}, err
 	}
+	notional := event.Quantity.Mul(event.UnitPrice)
+	if event.Kind == domain.Dividend || event.Kind == domain.Fee {
+		notional = event.Amount
+	}
+	if err := domain.ValidateCashAmount(notional, event.Currency); err != nil {
+		return domain.AccountPosition{}, err
+	}
+	cashKey := cashKey{portfolio, event.Currency}
+	balance := s.cash[cashKey]
+	if event.Kind == domain.Buy || event.Kind == domain.Fee {
+		if balance.LessThan(notional) {
+			return domain.AccountPosition{}, ErrInsufficientCash
+		}
+		balance = balance.Sub(notional)
+	} else {
+		balance = balance.Add(notional)
+	}
+	updated.Currency = event.Currency
+	s.cash[cashKey] = balance
+	s.instrumentCurrencies[symbol] = event.Currency
 	s.positions[key] = updated
 	cmd.result = updated.Clone()
 	s.tradeKeys[idempotencyKey] = cmd
@@ -112,6 +145,9 @@ func (s *InMemoryState) ListAccountPositions(_ context.Context, portfolio uuid.U
 }
 
 func (s *InMemoryState) CashBalance(_ context.Context, portfolio uuid.UUID, currency string) (decimal.Decimal, error) {
+	if err := domain.ValidateCashAmount(decimal.Zero, currency); err != nil {
+		return decimal.Zero, err
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.cash[cashKey{portfolio, currency}], nil
@@ -129,7 +165,10 @@ func (s *InMemoryState) MoveCash(_ context.Context, portfolio uuid.UUID, currenc
 	if direction != "FUND" && direction != "WITHDRAW" {
 		return decimal.Zero, errors.New("unsupported cash direction")
 	}
-	if _, err := domain.NewMoney(amount, currency); err != nil {
+	if portfolio == uuid.Nil {
+		return decimal.Zero, errors.New("portfolio required")
+	}
+	if err := domain.ValidateCashAmount(amount, currency); err != nil {
 		return decimal.Zero, err
 	}
 	s.mu.Lock()
@@ -139,7 +178,7 @@ func (s *InMemoryState) MoveCash(_ context.Context, portfolio uuid.UUID, currenc
 		if previous.portfolio != cmd.portfolio || previous.currency != cmd.currency || previous.direction != cmd.direction || !previous.amount.Equal(cmd.amount) {
 			return decimal.Zero, ErrIdempotencyConflict
 		}
-		return s.cash[cashKey{portfolio, currency}], nil
+		return previous.result, nil
 	}
 	key := cashKey{portfolio, currency}
 	balance := s.cash[key]
@@ -152,6 +191,7 @@ func (s *InMemoryState) MoveCash(_ context.Context, portfolio uuid.UUID, currenc
 		balance = balance.Add(amount)
 	}
 	s.cash[key] = balance
+	cmd.result = balance
 	s.cashKeys[idempotencyKey] = cmd
 	return balance, nil
 }

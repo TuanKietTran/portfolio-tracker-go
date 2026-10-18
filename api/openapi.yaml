@@ -4,8 +4,8 @@ info:
   version: 1.0.0
   description: >-
     Current production-router contract. Trades and summary share accounting state.
-    Cash remains a local simulation; trades do not yet debit cash. Instrument,
-    pricing management, corporate-action and returns routes are not yet callable.
+    Cash remains a local simulation; trades atomically update holdings and cash.
+    Instrument/pricing management, corporate-action and returns routes are not yet callable.
     The original in-process playback exercises a separate legacy compatibility adapter.
 servers:
   - url: http://localhost:8105
@@ -17,7 +17,8 @@ paths:
       description: >-
         Same accounting store and replay rules as the position-specific trade route.
         BUY or SELL only; oversells and missing keys are rejected. Same-payload
-        replay returns 201 without another effect. Currency/cash linkage remains pending.
+        replay returns 201 without another effect. Currency is required; buys debit
+        local cash and sells credit it atomically. Insufficient cash is 409.
       parameters:
         - $ref: '#/components/parameters/PortfolioId'
         - name: Idempotency-Key
@@ -35,7 +36,7 @@ paths:
         '400':
           description: Invalid request, missing/disagreeing key or rejected oversell.
         '409':
-          description: Idempotency key payload conflict.
+          description: Idempotency key payload conflict or insufficient local cash.
   /v1/portfolios/{id}/summary:
     get:
       operationId: getPortfolioSummary
@@ -91,7 +92,11 @@ paths:
         In-memory accounting path, sharing the production trades/summary store.
         A nonempty Idempotency-Key header or idempotency_key body field is required;
         if both are supplied they must match. Replays return the original position
-        snapshot without another effect. Keys are global to this accounting trade store.
+        snapshot without another effect. Keys are global to this accounting trade store. Currency is required and
+        fixed for each symbol by its first successful trade. Quantities/prices use
+        at most 30 coefficient digits and exponent -18 through 18. Notionals must
+        settle exactly in minor units (USD/EUR/GBP 2, JPY 0); fractional minor units
+        are rejected, never silently rounded. Cost method is immutable per position.
       parameters:
         - name: Idempotency-Key
           in: header
@@ -107,8 +112,9 @@ paths:
           application/json:
             schema:
               type: object
-              required: [side, quantity, price]
+              required: [side, quantity, price, currency]
               properties:
+                currency: { type: string, enum: [USD, EUR, GBP, JPY] }
                 side: { type: string, enum: [BUY, SELL] }
                 quantity: { type: string }
                 price: { type: string }
@@ -116,7 +122,7 @@ paths:
       responses:
         '201': { description: Accounting trade accepted or same-payload replay; original position snapshot returned. }
         '400': { description: Invalid request, missing/disagreeing key or rejected oversell. }
-        '409': { description: Key reused with a different portfolio, symbol, side, quantity or price. }
+        '409': { description: Insufficient cash or key reused with a different portfolio, symbol, currency, side, quantity or price. }
   /v1/portfolios/{id}/cash:
     get:
       operationId: getCashBalance
@@ -132,7 +138,9 @@ paths:
   /v1/portfolios/{id}/cash/fund:
     post:
       operationId: fundCash
-      parameters: [{ $ref: '#/components/parameters/PortfolioId' }]
+      parameters:
+        - { $ref: '#/components/parameters/PortfolioId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
       requestBody:
         required: true
         content:
@@ -142,10 +150,13 @@ paths:
         '200': { description: Funding accepted; returns local balance. }
         '400': { description: Invalid request. }
         '409': { description: Idempotency conflict or insufficient cash. }
+        '503': { description: Payment-backed cash boundary configured without safe recovery support; no transfer attempted. }
   /v1/portfolios/{id}/cash/withdraw:
     post:
       operationId: withdrawCash
-      parameters: [{ $ref: '#/components/parameters/PortfolioId' }]
+      parameters:
+        - { $ref: '#/components/parameters/PortfolioId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
       requestBody:
         required: true
         content:
@@ -155,8 +166,13 @@ paths:
         '200': { description: Withdrawal accepted; returns local balance. }
         '400': { description: Invalid request. }
         '409': { description: Idempotency conflict or insufficient cash. }
+        '503': { description: Payment-backed cash boundary configured without safe recovery support; no transfer attempted. }
 components:
   parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      schema: { type: string, minLength: 1 }
     ValuationCurrency:
       name: currency
       in: query
@@ -185,9 +201,10 @@ components:
   schemas:
     TradeRequest:
       type: object
-      required: [symbol, side, quantity, price]
+      required: [symbol, side, quantity, price, currency]
       properties:
         symbol: { type: string }
+        currency: { type: string, enum: [USD, EUR, GBP, JPY] }
         side: { type: string, enum: [BUY, SELL] }
         quantity: { type: string, example: '2.5', description: Decimal quantity encoded as a JSON decimal string. }
         price: { type: string, example: '10.25', description: Decimal price encoded as a JSON decimal string. }
@@ -217,9 +234,15 @@ components:
         price_as_of: { type: integer, format: int64 }
     CashMovement:
       type: object
-      required: [currency, amount, idempotency_key]
+      required: [currency, amount]
+      description: >-
+        Idempotency-Key header or body idempotency_key required; both must agree.
+        Replay returns the original cash result without another effect. Keys are
+        global within the cash store, separate from accounting-trade keys. Exact
+        minor-unit amounts only (USD/EUR/GBP 2, JPY 0), with at most 30 coefficient
+        digits and exponent -18 through 18; no implicit rounding or conversion.
       properties:
-        currency: { type: string, minLength: 3, maxLength: 3 }
+        currency: { type: string, enum: [USD, EUR, GBP, JPY] }
         amount: { type: string, example: '25.00' }
         idempotency_key: { type: string, minLength: 1 }
     PortfolioSummary:

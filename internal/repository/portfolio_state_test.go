@@ -17,7 +17,10 @@ func TestStateAccountingCashIdempotencyAndConflict(t *testing.T) {
 	s := NewInMemoryState()
 	ctx := context.Background()
 	id := uuid.New()
-	p, err := s.ApplyTrade(ctx, id, "ACME", domain.AccountingEvent{Kind: domain.Buy, Quantity: pd("2"), UnitPrice: pd("10")}, domain.FIFO, "buy-1")
+	if _, err := s.MoveCash(ctx, id, "USD", "FUND", pd("20"), "seed"); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.ApplyTrade(ctx, id, "ACME", domain.AccountingEvent{Currency: "USD", Kind: domain.Buy, Quantity: pd("2"), UnitPrice: pd("10")}, domain.FIFO, "buy-1")
 	if err != nil || !p.CostBasis.Equal(pd("20")) {
 		t.Fatalf("position=%+v err=%v", p, err)
 	}

@@ -55,6 +55,8 @@ type Lot struct {
 }
 
 type AccountPosition struct {
+	Currency    string
+	Method      CostMethod
 	Quantity    decimal.Decimal
 	CostBasis   decimal.Decimal
 	RealizedPnL decimal.Decimal
@@ -71,6 +73,7 @@ const (
 )
 
 type AccountingEvent struct {
+	Currency  string
 	Kind      EventKind
 	Quantity  decimal.Decimal
 	UnitPrice decimal.Decimal
@@ -87,9 +90,23 @@ func (p AccountPosition) Clone() AccountPosition {
 // are cash income/expense and do not alter security quantity or cost basis.
 func ApplyEvent(position AccountPosition, event AccountingEvent, method CostMethod) (AccountPosition, error) {
 	position = position.Clone()
+	if event.Currency != "" {
+		money, err := NewMoney(decimal.Zero, event.Currency)
+		if err != nil {
+			return position, err
+		}
+		if position.Currency != "" && position.Currency != money.Currency {
+			return position, errors.New("position currency mismatch")
+		}
+		position.Currency = money.Currency
+	}
 	if method != FIFO && method != AverageCost {
 		return position, errors.New("unsupported cost method")
 	}
+	if position.Method != "" && position.Method != method {
+		return position, errors.New("position cost method is immutable")
+	}
+	position.Method = method
 	if event.Kind == Dividend || event.Kind == Fee {
 		if event.Amount.IsNegative() {
 			return position, errors.New("cash event amount cannot be negative")
@@ -103,6 +120,12 @@ func ApplyEvent(position AccountPosition, event AccountingEvent, method CostMeth
 	}
 	if event.Kind != Buy && event.Kind != Sell {
 		return position, errors.New("unsupported event kind")
+	}
+	if err := ValidateDecimalPrecision(event.Quantity); err != nil {
+		return position, err
+	}
+	if err := ValidateDecimalPrecision(event.UnitPrice); err != nil {
+		return position, err
 	}
 	if !event.Quantity.IsPositive() || event.UnitPrice.IsNegative() {
 		return position, errors.New("quantity must be positive and price non-negative")

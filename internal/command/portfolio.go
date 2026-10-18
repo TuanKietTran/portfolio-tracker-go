@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
 
 	"github.com/TuanKietTran/portfolio-tracker-go/internal/domain"
 	"github.com/TuanKietTran/portfolio-tracker-go/internal/repository"
@@ -21,6 +22,8 @@ type PriceFunc func(context.Context, string, string) (domain.Price, error)
 func (f PriceFunc) Price(ctx context.Context, symbol, currency string) (domain.Price, error) {
 	return f(ctx, symbol, currency)
 }
+
+var ErrPaymentCashUnavailable = errors.New("payment-backed cash requires a recovery-safe outbox; unavailable")
 
 type PaymentCashPort interface {
 	Move(context.Context, uuid.UUID, string, string, decimal.Decimal, string) error
@@ -44,7 +47,7 @@ func NewPortfolioService(state repository.PortfolioState, prices PriceFeed, paym
 }
 
 func (s *PortfolioService) Trade(ctx context.Context, portfolio uuid.UUID, symbol string, event domain.AccountingEvent, key string) (domain.AccountPosition, error) {
-	if symbol == "" {
+	if symbol == "" || strings.TrimSpace(symbol) != symbol {
 		return domain.AccountPosition{}, errors.New("symbol is required")
 	}
 	return s.state.ApplyTrade(ctx, portfolio, symbol, event, s.method, key)
@@ -124,14 +127,15 @@ func (s *PortfolioService) Summary(ctx context.Context, portfolio uuid.UUID, cur
 }
 
 func (s *PortfolioService) Cash(ctx context.Context, portfolio uuid.UUID, currency string) (decimal.Decimal, error) {
-	if _, err := domain.NewMoney(decimal.Zero, currency); err != nil {
+	if err := domain.ValidateCashAmount(decimal.Zero, currency); err != nil {
 		return decimal.Zero, err
 	}
 	return s.state.CashBalance(ctx, portfolio, currency)
 }
 
-// MoveCash invokes the injected payment boundary before reflecting a successful transfer locally.
-// Its idempotency key must be honored by that boundary. The local in-memory adapter is not a durable outbox.
+// MoveCash supports local simulation only until a durable payment outbox can
+// reserve cash and recover ambiguous downstream commits. A configured external
+// boundary fails closed rather than transferring before local validation.
 func (s *PortfolioService) MoveCash(ctx context.Context, portfolio uuid.UUID, currency, direction string, amount decimal.Decimal, key string) (decimal.Decimal, error) {
 	if key == "" || amount.Sign() <= 0 {
 		return decimal.Zero, errors.New("positive amount and idempotency key required")
@@ -139,19 +143,8 @@ func (s *PortfolioService) MoveCash(ctx context.Context, portfolio uuid.UUID, cu
 	if direction != "FUND" && direction != "WITHDRAW" {
 		return decimal.Zero, errors.New("unsupported cash direction")
 	}
-	if direction == "WITHDRAW" {
-		balance, err := s.state.CashBalance(ctx, portfolio, currency)
-		if err != nil {
-			return decimal.Zero, err
-		}
-		if balance.LessThan(amount) {
-			return balance, repository.ErrInsufficientCash
-		}
-	}
 	if s.payments != nil {
-		if err := s.payments.Move(ctx, portfolio, currency, direction, amount, key); err != nil {
-			return decimal.Zero, err
-		}
+		return decimal.Zero, ErrPaymentCashUnavailable
 	}
 	return s.state.MoveCash(ctx, portfolio, currency, direction, amount, key)
 }

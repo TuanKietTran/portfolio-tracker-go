@@ -23,7 +23,7 @@ type PositionValuation struct {
 
 // ValuePosition requires a price no older than maxAge at asOf and enforces currency equality.
 func ValuePosition(position AccountPosition, symbol, currency string, price Price, asOf, maxAge int64) (PositionValuation, error) {
-	if symbol != price.Symbol || currency != price.Currency {
+	if symbol != price.Symbol || currency != price.Currency || (position.Currency != "" && position.Currency != currency) {
 		return PositionValuation{}, errors.New("price instrument or currency mismatch")
 	}
 	if price.Amount.IsNegative() {

@@ -15,9 +15,12 @@ func TestSummaryDeterministicSortedMarkedSnapshot(t *testing.T) {
 	state := repository.NewInMemoryState()
 	feed := repository.NewStaticPriceFeed()
 	svc, _ := NewPortfolioService(state, feed, nil, domain.FIFO)
+	if _, err := svc.MoveCash(ctx, id, "USD", "FUND", cd("100"), "seed"); err != nil {
+		t.Fatal(err)
+	}
 	for _, symbol := range []string{"ZED", "ACME"} {
 		feed.Set(domain.Price{Symbol: symbol, Currency: "USD", Amount: cd("12"), AsOf: 100})
-		if _, err := svc.Trade(ctx, id, symbol, domain.AccountingEvent{Kind: domain.Buy, Quantity: cd("2"), UnitPrice: cd("10")}, symbol); err != nil {
+		if _, err := svc.Trade(ctx, id, symbol, domain.AccountingEvent{Currency: "USD", Kind: domain.Buy, Quantity: cd("2"), UnitPrice: cd("10")}, symbol); err != nil {
 			t.Fatal(err)
 		}
 	}

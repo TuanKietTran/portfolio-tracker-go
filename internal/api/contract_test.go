@@ -35,8 +35,8 @@ func TestOpenAPIParsesAndDeclaresImplementedRoutesAndStatuses(t *testing.T) {
 		"/v1/portfolios/{id}/positions/{symbol}":        {"get": {"200", "400"}},
 		"/v1/portfolios/{id}/positions/{symbol}/trades": {"post": {"201", "400", "409"}},
 		"/v1/portfolios/{id}/cash":                      {"get": {"200", "400"}},
-		"/v1/portfolios/{id}/cash/fund":                 {"post": {"200", "400", "409"}},
-		"/v1/portfolios/{id}/cash/withdraw":             {"post": {"200", "400", "409"}},
+		"/v1/portfolios/{id}/cash/fund":                 {"post": {"200", "400", "409", "503"}},
+		"/v1/portfolios/{id}/cash/withdraw":             {"post": {"200", "400", "409", "503"}},
 	}
 	if len(spec.Paths) != len(want) {
 		t.Fatalf("OpenAPI paths=%d want=%d", len(spec.Paths), len(want))
@@ -106,7 +106,7 @@ func TestPortfolioCashAndValuationHTTPStatuses(t *testing.T) {
 	if got := request(http.MethodGet, "/v1/portfolios/"+id+"/cash?currency=USD", ""); got != 200 {
 		t.Fatalf("cash status=%d", got)
 	}
-	if got := request(http.MethodPost, "/v1/portfolios/"+id+"/positions/ACME/trades", `{"side":"BUY","quantity":"2","price":"10","idempotency_key":"trade-1"}`); got != 201 {
+	if got := request(http.MethodPost, "/v1/portfolios/"+id+"/positions/ACME/trades", `{"currency":"USD","side":"BUY","quantity":"2","price":"10","idempotency_key":"trade-1"}`); got != 201 {
 		t.Fatalf("trade status=%d", got)
 	}
 	if got := request(http.MethodGet, "/v1/portfolios/"+id+"/positions/ACME?currency=USD&as_of=100&max_age=5", ""); got != 200 {

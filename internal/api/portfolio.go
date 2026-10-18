@@ -45,6 +45,9 @@ type positionResponse struct {
 func portfolioID(r *http.Request) (uuid.UUID, error) { return uuid.Parse(chi.URLParam(r, "id")) }
 func writePortfolioError(w http.ResponseWriter, err error) {
 	status := http.StatusBadRequest
+	if errors.Is(err, command.ErrPaymentCashUnavailable) {
+		status = http.StatusServiceUnavailable
+	}
 	if errors.Is(err, repository.ErrInsufficientCash) || errors.Is(err, repository.ErrIdempotencyConflict) {
 		status = http.StatusConflict
 	}
@@ -122,6 +125,7 @@ func (h *PortfolioHandlers) summary(w http.ResponseWriter, r *http.Request) {
 }
 
 type accountingTradeRequest struct {
+	Currency       string          `json:"currency"`
 	Symbol         string          `json:"symbol"`
 	Side           string          `json:"side"`
 	Quantity       decimal.Decimal `json:"quantity"`
@@ -162,7 +166,7 @@ func (h *PortfolioHandlers) trade(w http.ResponseWriter, r *http.Request) {
 		writePortfolioError(w, errors.New("body symbol and path disagree"))
 		return
 	}
-	p, err := h.service.Trade(r.Context(), id, symbol, domain.AccountingEvent{Kind: kind, Quantity: req.Quantity, UnitPrice: req.Price}, key)
+	p, err := h.service.Trade(r.Context(), id, symbol, domain.AccountingEvent{Kind: kind, Currency: req.Currency, Quantity: req.Quantity, UnitPrice: req.Price}, key)
 	if err != nil {
 		writePortfolioError(w, err)
 		return
@@ -191,7 +195,15 @@ func (h *PortfolioHandlers) moveCash(w http.ResponseWriter, r *http.Request, dir
 		http.Error(w, "invalid json", 400)
 		return
 	}
-	balance, err := h.service.MoveCash(r.Context(), id, req.Currency, direction, req.Amount, req.IdempotencyKey)
+	key := r.Header.Get("Idempotency-Key")
+	if key != "" && req.IdempotencyKey != "" && key != req.IdempotencyKey {
+		writePortfolioError(w, errors.New("idempotency header and body disagree"))
+		return
+	}
+	if key == "" {
+		key = req.IdempotencyKey
+	}
+	balance, err := h.service.MoveCash(r.Context(), id, req.Currency, direction, req.Amount, key)
 	if err != nil {
 		writePortfolioError(w, err)
 		return
