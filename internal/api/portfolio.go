@@ -27,6 +27,7 @@ func (h *PortfolioHandlers) Routes() chi.Router {
 	r.Post("/prices", h.publishPrice)
 	r.Get("/prices/{symbol}", h.price)
 	r.Post("/portfolios/{id}/trades", h.trade)
+	r.Post("/portfolios/{id}/corporate-actions", h.corporateAction)
 	r.Get("/portfolios/{id}/summary", h.summary)
 	r.Get("/portfolios/{id}/positions/{symbol}", h.position)
 	r.Post("/portfolios/{id}/positions/{symbol}/trades", h.trade)

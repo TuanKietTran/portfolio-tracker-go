@@ -9,7 +9,7 @@ info:
     Position and summary holdings are current snapshots; as_of selects historical
     price marks only, not historical holdings or trade-event replay. FX conversion
     and cross-currency aggregation are not implemented.
-    Corporate-action and returns routes are not yet callable.
+    Keyed corporate split/dividend/fee actions are callable; returns routes are not yet callable.
     The original in-process playback exercises a separate legacy compatibility adapter.
     All production responses include X-Request-ID. Errors use the Error schema;
     common runtime errors are 404 (route), 405 (method) and 500 (panic before response).
@@ -119,6 +119,41 @@ paths:
                   requests: { type: integer, format: int64 }
                   errors: { type: integer, format: int64 }
                   panics: { type: integer, format: int64 }
+  /v1/portfolios/{id}/corporate-actions:
+    post:
+      operationId: applyCorporateAction
+      description: >-
+        Immediate local action on an existing portfolio position and registered instrument.
+        DIVIDEND/FEE amount is the total cash amount, not a per-share rate; it must
+        settle exactly in currency minor units. DIVIDEND/SPLIT require held shares;
+        FEE may apply to a previously held closed position. SPLIT requires positive
+        numerator/denominator and exactly representable aggregate/per-lot quantities
+        at18 fractional places; cash-in-lieu is unsupported. Reject nonzero split
+        amount or any ratio on a cash action. Holdings/cash/key/original response commit
+        atomically. Insufficient fee cash has no effect and does not consume the key.
+        Same key/payload replays original holdings AND cash snapshot even after later
+        changes. Corporate keys are global in their own namespace, separate from
+        trade/cash/instrument/price keys. The price feed is not auto-adjusted by a split;
+        publish an appropriate simulated post-action mark explicitly. No historical
+        ownership replay, durable recovery or external cash posting is implied.
+      parameters:
+        - { $ref: '#/components/parameters/PortfolioId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CorporateAction' }
+      responses:
+        '201':
+          description: Action applied or original result replayed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CorporateResult' }
+        '400': { description: Invalid ID/key/action, unsupported/inexact split or missing held shares. }
+        '404': { description: Unknown instrument or no previously held position. }
+        '409': { description: Insufficient fee cash, key payload conflict or currency mismatch. }
+        '413': { description: Body exceeds 16384 bytes. }
   /v1/portfolios/{id}/trades:
     post:
       operationId: recordTrade
@@ -319,6 +354,49 @@ components:
         type: string
         format: uuid
   schemas:
+    CorporateAction:
+      type: object
+      additionalProperties: false
+      required: [symbol, kind, currency]
+      properties:
+        symbol: { type: string, minLength: 1, maxLength: 32 }
+        kind: { type: string, enum: [SPLIT, DIVIDEND, FEE] }
+        currency: { type: string, enum: [USD, EUR, GBP, JPY] }
+        amount: { type: string, description: Positive total minor-unit cash amount for DIVIDEND/FEE; omit or zero for SPLIT. }
+        numerator: { type: integer, format: int64, description: Positive for SPLIT; omit or zero for cash action. }
+        denominator: { type: integer, format: int64, description: Positive for SPLIT; omit or zero for cash action. }
+        idempotency_key: { type: string, minLength: 1, maxLength: 200 }
+      oneOf:
+        - required: [numerator, denominator]
+          properties:
+            kind: { enum: [SPLIT] }
+        - required: [amount]
+          properties:
+            kind: { enum: [DIVIDEND, FEE] }
+    CorporateResult:
+      type: object
+      required: [position, cash_balance, currency]
+      properties:
+        position: { $ref: '#/components/schemas/AccountingPosition' }
+        cash_balance: { type: string }
+        currency: { type: string }
+    AccountingPosition:
+      type: object
+      properties:
+        Currency: { type: string }
+        Method: { type: string, enum: [FIFO, AVERAGE_COST] }
+        Quantity: { type: string }
+        CostBasis: { type: string }
+        RealizedPnL: { type: string, description: Trade realized gains plus dividends minus fees. }
+        Lots:
+          type: array
+          nullable: true
+          items:
+            type: object
+            properties:
+              Quantity: { type: string }
+              UnitCost: { type: string }
+              CostBasis: { type: string }
     Instrument:
       type: object
       required: [symbol, currency]

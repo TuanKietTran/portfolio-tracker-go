@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 
 	"github.com/TuanKietTran/portfolio-tracker-go/internal/domain"
@@ -23,7 +22,7 @@ type PortfolioState interface {
 	ListAccountPositions(context.Context, uuid.UUID) (map[string]domain.AccountPosition, error)
 	CashBalance(context.Context, uuid.UUID, string) (decimal.Decimal, error)
 	MoveCash(context.Context, uuid.UUID, string, string, decimal.Decimal, string) (decimal.Decimal, error)
-	ApplySplit(context.Context, uuid.UUID, string, int64, int64) (domain.AccountPosition, error)
+	ApplyCorporateAction(context.Context, uuid.UUID, string, domain.CorporateAction, string) (CorporateResult, error)
 }
 
 type stateKey struct {
@@ -64,10 +63,11 @@ type InMemoryState struct {
 	tradeKeys            map[string]tradeCommand
 	instrumentCurrencies map[string]string
 	instrumentKeys       map[string]domain.Instrument
+	corporateKeys        map[string]corporateCommand
 }
 
 func NewInMemoryState() *InMemoryState {
-	return &InMemoryState{positions: map[stateKey]domain.AccountPosition{}, cash: map[cashKey]decimal.Decimal{}, cashKeys: map[string]cashCommand{}, tradeKeys: map[string]tradeCommand{}, instrumentCurrencies: map[string]string{}, instrumentKeys: map[string]domain.Instrument{}}
+	return &InMemoryState{positions: map[stateKey]domain.AccountPosition{}, cash: map[cashKey]decimal.Decimal{}, cashKeys: map[string]cashCommand{}, tradeKeys: map[string]tradeCommand{}, instrumentCurrencies: map[string]string{}, instrumentKeys: map[string]domain.Instrument{}, corporateKeys: map[string]corporateCommand{}}
 }
 
 func (s *InMemoryState) ApplyTrade(_ context.Context, portfolio uuid.UUID, symbol string, event domain.AccountingEvent, method domain.CostMethod, idempotencyKey string) (domain.AccountPosition, error) {
@@ -200,16 +200,4 @@ func (s *InMemoryState) MoveCash(_ context.Context, portfolio uuid.UUID, currenc
 	cmd.result = balance
 	s.cashKeys[idempotencyKey] = cmd
 	return balance, nil
-}
-
-func (s *InMemoryState) ApplySplit(_ context.Context, portfolio uuid.UUID, symbol string, numerator, denominator int64) (domain.AccountPosition, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	key := stateKey{portfolio, symbol}
-	position, err := domain.ApplySplit(s.positions[key], numerator, denominator)
-	if err != nil {
-		return domain.AccountPosition{}, fmt.Errorf("apply split: %w", err)
-	}
-	s.positions[key] = position
-	return position.Clone(), nil
 }

@@ -149,6 +149,6 @@ func (s *PortfolioService) MoveCash(ctx context.Context, portfolio uuid.UUID, cu
 	return s.state.MoveCash(ctx, portfolio, currency, direction, amount, key)
 }
 
-func (s *PortfolioService) Split(ctx context.Context, portfolio uuid.UUID, symbol string, numerator, denominator int64) (domain.AccountPosition, error) {
-	return s.state.ApplySplit(ctx, portfolio, symbol, numerator, denominator)
+func (s *PortfolioService) CorporateAction(ctx context.Context, portfolio uuid.UUID, symbol string, action domain.CorporateAction, key string) (repository.CorporateResult, error) {
+	return s.state.ApplyCorporateAction(ctx, portfolio, symbol, action, key)
 }
