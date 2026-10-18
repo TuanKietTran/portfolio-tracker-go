@@ -75,7 +75,15 @@ paths:
   /v1/portfolios/{id}/positions/{symbol}/trades:
     post:
       operationId: recordAccountingTrade
+      description: >-
+        In-memory accounting path, separate from the legacy trades/summary store.
+        A nonempty Idempotency-Key header or idempotency_key body field is required;
+        if both are supplied they must match. Replays return the original position
+        snapshot without another effect. Keys are global to this accounting trade store.
       parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string, minLength: 1 }
         - $ref: '#/components/parameters/PortfolioId'
         - name: symbol
           in: path
@@ -92,9 +100,11 @@ paths:
                 side: { type: string, enum: [BUY, SELL] }
                 quantity: { type: string }
                 price: { type: string }
+                idempotency_key: { type: string, minLength: 1 }
       responses:
-        '201': { description: Accounting trade accepted. }
-        '400': { description: Invalid request or rejected oversell. }
+        '201': { description: Accounting trade accepted or same-payload replay; original position snapshot returned. }
+        '400': { description: Invalid request, missing/disagreeing key or rejected oversell. }
+        '409': { description: Key reused with a different portfolio, symbol, side, quantity or price. }
   /v1/portfolios/{id}/cash:
     get:
       operationId: getCashBalance

@@ -16,7 +16,7 @@ var ErrIdempotencyConflict = errors.New("idempotency key payload conflict")
 
 // PortfolioState is the atomic persistence boundary for positions and portfolio cash.
 type PortfolioState interface {
-	ApplyTrade(context.Context, uuid.UUID, string, domain.AccountingEvent, domain.CostMethod) (domain.AccountPosition, error)
+	ApplyTrade(context.Context, uuid.UUID, string, domain.AccountingEvent, domain.CostMethod, string) (domain.AccountPosition, error)
 	GetAccountPosition(context.Context, uuid.UUID, string) (domain.AccountPosition, error)
 	CashBalance(context.Context, uuid.UUID, string) (decimal.Decimal, error)
 	MoveCash(context.Context, uuid.UUID, string, string, decimal.Decimal, string) (decimal.Decimal, error)
@@ -37,36 +37,65 @@ type cashCommand struct {
 	amount              decimal.Decimal
 }
 
+type tradeCommand struct {
+	portfolio uuid.UUID
+	symbol    string
+	event     domain.AccountingEvent
+	method    domain.CostMethod
+	result    domain.AccountPosition
+}
+
+func (c tradeCommand) matches(other tradeCommand) bool {
+	return c.portfolio == other.portfolio && c.symbol == other.symbol && c.method == other.method &&
+		c.event.Kind == other.event.Kind && c.event.Quantity.Equal(other.event.Quantity) &&
+		c.event.UnitPrice.Equal(other.event.UnitPrice) && c.event.Amount.Equal(other.event.Amount)
+}
+
 // InMemoryState serializes position and cash changes. It is not durable across restarts.
 type InMemoryState struct {
 	mu        sync.RWMutex
 	positions map[stateKey]domain.AccountPosition
 	cash      map[cashKey]decimal.Decimal
 	cashKeys  map[string]cashCommand
+	tradeKeys map[string]tradeCommand
 }
 
 func NewInMemoryState() *InMemoryState {
-	return &InMemoryState{positions: map[stateKey]domain.AccountPosition{}, cash: map[cashKey]decimal.Decimal{}, cashKeys: map[string]cashCommand{}}
+	return &InMemoryState{positions: map[stateKey]domain.AccountPosition{}, cash: map[cashKey]decimal.Decimal{}, cashKeys: map[string]cashCommand{}, tradeKeys: map[string]tradeCommand{}}
 }
 
-func (s *InMemoryState) ApplyTrade(_ context.Context, portfolio uuid.UUID, symbol string, event domain.AccountingEvent, method domain.CostMethod) (domain.AccountPosition, error) {
+func (s *InMemoryState) ApplyTrade(_ context.Context, portfolio uuid.UUID, symbol string, event domain.AccountingEvent, method domain.CostMethod, idempotencyKey string) (domain.AccountPosition, error) {
+	if idempotencyKey == "" {
+		return domain.AccountPosition{}, errors.New("idempotency key required")
+	}
+	if portfolio == uuid.Nil || symbol == "" {
+		return domain.AccountPosition{}, errors.New("portfolio and symbol required")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	cmd := tradeCommand{portfolio: portfolio, symbol: symbol, event: event, method: method}
+	if previous, ok := s.tradeKeys[idempotencyKey]; ok {
+		if !previous.matches(cmd) {
+			return domain.AccountPosition{}, ErrIdempotencyConflict
+		}
+		return previous.result.Clone(), nil
+	}
 	key := stateKey{portfolio, symbol}
 	updated, err := domain.ApplyEvent(s.positions[key], event, method)
 	if err != nil {
 		return domain.AccountPosition{}, err
 	}
 	s.positions[key] = updated
-	return updated, nil
+	cmd.result = updated.Clone()
+	s.tradeKeys[idempotencyKey] = cmd
+	return updated.Clone(), nil
 }
 
 func (s *InMemoryState) GetAccountPosition(_ context.Context, portfolio uuid.UUID, symbol string) (domain.AccountPosition, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	p := s.positions[stateKey{portfolio, symbol}]
-	p.Lots = append([]domain.Lot(nil), p.Lots...)
-	return p, nil
+	return p.Clone(), nil
 }
 
 func (s *InMemoryState) CashBalance(_ context.Context, portfolio uuid.UUID, currency string) (decimal.Decimal, error) {
@@ -123,5 +152,5 @@ func (s *InMemoryState) ApplySplit(_ context.Context, portfolio uuid.UUID, symbo
 		return domain.AccountPosition{}, fmt.Errorf("apply split: %w", err)
 	}
 	s.positions[key] = position
-	return position, nil
+	return position.Clone(), nil
 }

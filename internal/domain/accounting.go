@@ -77,9 +77,16 @@ type AccountingEvent struct {
 	Amount    decimal.Decimal
 }
 
+// Clone returns an independent position snapshot, including its mutable lot slice.
+func (p AccountPosition) Clone() AccountPosition {
+	p.Lots = append([]Lot(nil), p.Lots...)
+	return p
+}
+
 // ApplyEvent returns a new position, leaving the input unchanged on errors. Fees/dividends
 // are cash income/expense and do not alter security quantity or cost basis.
 func ApplyEvent(position AccountPosition, event AccountingEvent, method CostMethod) (AccountPosition, error) {
+	position = position.Clone()
 	if method != FIFO && method != AverageCost {
 		return position, errors.New("unsupported cost method")
 	}
@@ -145,6 +152,7 @@ func ApplyEvent(position AccountPosition, event AccountingEvent, method CostMeth
 
 // ApplySplit scales quantity and inversely scales per-unit lot cost; total cost basis is conserved.
 func ApplySplit(position AccountPosition, numerator, denominator int64) (AccountPosition, error) {
+	position = position.Clone()
 	if numerator <= 0 || denominator <= 0 {
 		return position, errors.New("split ratio terms must be positive")
 	}

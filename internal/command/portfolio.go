@@ -42,11 +42,11 @@ func NewPortfolioService(state repository.PortfolioState, prices PriceFeed, paym
 	return &PortfolioService{state: state, prices: prices, payments: payments, method: method}, nil
 }
 
-func (s *PortfolioService) Trade(ctx context.Context, portfolio uuid.UUID, symbol string, event domain.AccountingEvent) (domain.AccountPosition, error) {
+func (s *PortfolioService) Trade(ctx context.Context, portfolio uuid.UUID, symbol string, event domain.AccountingEvent, key string) (domain.AccountPosition, error) {
 	if symbol == "" {
 		return domain.AccountPosition{}, errors.New("symbol is required")
 	}
-	return s.state.ApplyTrade(ctx, portfolio, symbol, event, s.method)
+	return s.state.ApplyTrade(ctx, portfolio, symbol, event, s.method, key)
 }
 
 func (s *PortfolioService) Position(ctx context.Context, portfolio uuid.UUID, symbol, currency string, asOf, maxAge int64) (domain.AccountPosition, domain.PositionValuation, error) {

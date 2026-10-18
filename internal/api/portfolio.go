@@ -85,9 +85,10 @@ func (h *PortfolioHandlers) cash(w http.ResponseWriter, r *http.Request) {
 }
 
 type accountingTradeRequest struct {
-	Side     string          `json:"side"`
-	Quantity decimal.Decimal `json:"quantity"`
-	Price    decimal.Decimal `json:"price"`
+	Side           string          `json:"side"`
+	Quantity       decimal.Decimal `json:"quantity"`
+	Price          decimal.Decimal `json:"price"`
+	IdempotencyKey string          `json:"idempotency_key"`
 }
 
 func (h *PortfolioHandlers) trade(w http.ResponseWriter, r *http.Request) {
@@ -101,12 +102,20 @@ func (h *PortfolioHandlers) trade(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json", 400)
 		return
 	}
+	key := r.Header.Get("Idempotency-Key")
+	if key != "" && req.IdempotencyKey != "" && key != req.IdempotencyKey {
+		http.Error(w, "idempotency header and body disagree", 400)
+		return
+	}
+	if key == "" {
+		key = req.IdempotencyKey
+	}
 	kind := domain.EventKind(req.Side)
 	if kind != "BUY" && kind != "SELL" {
 		http.Error(w, "side must be BUY or SELL", 400)
 		return
 	}
-	p, err := h.service.Trade(r.Context(), id, chi.URLParam(r, "symbol"), domain.AccountingEvent{Kind: kind, Quantity: req.Quantity, UnitPrice: req.Price})
+	p, err := h.service.Trade(r.Context(), id, chi.URLParam(r, "symbol"), domain.AccountingEvent{Kind: kind, Quantity: req.Quantity, UnitPrice: req.Price}, key)
 	if err != nil {
 		writePortfolioError(w, err)
 		return
