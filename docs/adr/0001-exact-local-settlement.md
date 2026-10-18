@@ -8,4 +8,4 @@ The synchronized memory adapter commits holdings, cash and command identity toge
 
 The earlier payment port could perform an external movement before local validation/commit, allowing overspending or ambiguous outcomes. Until an outbox with durable reservations and posted-payment evidence is implemented, an injected external boundary fails closed with unavailable and no call is made. The default nil boundary explicitly selects local simulation. Portfolio never posts directly to ledger.
 
-Consequences: no payment-backed/S3/durable-recovery claim; no implicit FX or sub-minor-unit settlement support. Pure lot calculations retain decimal precision, and repeating split/average-cost residuals need separate conservation regression coverage before claiming universal exact P&L conservation.
+Consequences: no payment-backed/S3/durable-recovery claim; no implicit FX or sub-minor-unit settlement support. Pure lot calculations retain decimal precision. [ADR 0002](0002-authoritative-lot-basis.md) defines residual allocation and exact full-liquidation basis with repeating split/average-cost conservation regressions.
