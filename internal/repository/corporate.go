@@ -71,10 +71,15 @@ func (s *InMemoryState) ApplyCorporateAction(_ context.Context, portfolio uuid.U
 	if balance.IsNegative() {
 		return CorporateResult{}, ErrInsufficientCash
 	}
+	record, err := s.prepareHistoryLocked(portfolio, HistoryRecord{Kind: string(action.Kind), Symbol: symbol, Currency: action.Currency, Amount: action.Amount, Numerator: action.Numerator, Denominator: action.Denominator, CashDelta: delta})
+	if err != nil {
+		return CorporateResult{}, err
+	}
 	result := CorporateResult{Position: updated, CashBalance: balance, Currency: action.Currency}
 	s.positions[key] = updated
 	s.cash[cashKey] = balance
 	cmd.result = result.clone()
 	s.corporateKeys[idempotencyKey] = cmd
+	s.appendHistoryLocked(portfolio, record)
 	return result.clone(), nil
 }

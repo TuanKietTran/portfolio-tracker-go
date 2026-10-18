@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/TuanKietTran/portfolio-tracker-go/internal/domain"
 	"github.com/google/uuid"
@@ -15,6 +16,8 @@ var ErrIdempotencyConflict = errors.New("idempotency key payload conflict")
 
 // PortfolioState is the atomic persistence boundary for positions and portfolio cash.
 type PortfolioState interface {
+	History(context.Context, uuid.UUID, uint64, int) ([]HistoryRecord, error)
+	SnapshotAt(context.Context, uuid.UUID, time.Time) (PortfolioSnapshot, error)
 	RegisterInstrument(context.Context, domain.Instrument, string) (domain.Instrument, error)
 	GetInstrument(context.Context, string) (domain.Instrument, error)
 	ApplyTrade(context.Context, uuid.UUID, string, domain.AccountingEvent, domain.CostMethod, string) (domain.AccountPosition, error)
@@ -64,10 +67,23 @@ type InMemoryState struct {
 	instrumentCurrencies map[string]string
 	instrumentKeys       map[string]domain.Instrument
 	corporateKeys        map[string]corporateCommand
+	clock                Clock
+	history              map[uuid.UUID][]HistoryRecord
 }
 
 func NewInMemoryState() *InMemoryState {
-	return &InMemoryState{positions: map[stateKey]domain.AccountPosition{}, cash: map[cashKey]decimal.Decimal{}, cashKeys: map[string]cashCommand{}, tradeKeys: map[string]tradeCommand{}, instrumentCurrencies: map[string]string{}, instrumentKeys: map[string]domain.Instrument{}, corporateKeys: map[string]corporateCommand{}}
+	state, _ := NewInMemoryStateWithClock(ClockFunc(time.Now))
+	return state
+}
+
+func NewInMemoryStateWithClock(clock Clock) (*InMemoryState, error) {
+	if clock == nil {
+		return nil, errors.New("clock required")
+	}
+	if f, ok := clock.(ClockFunc); ok && f == nil {
+		return nil, errors.New("clock required")
+	}
+	return &InMemoryState{positions: map[stateKey]domain.AccountPosition{}, cash: map[cashKey]decimal.Decimal{}, cashKeys: map[string]cashCommand{}, tradeKeys: map[string]tradeCommand{}, instrumentCurrencies: map[string]string{}, instrumentKeys: map[string]domain.Instrument{}, corporateKeys: map[string]corporateCommand{}, clock: clock, history: map[uuid.UUID][]HistoryRecord{}}, nil
 }
 
 func (s *InMemoryState) ApplyTrade(_ context.Context, portfolio uuid.UUID, symbol string, event domain.AccountingEvent, method domain.CostMethod, idempotencyKey string) (domain.AccountPosition, error) {
@@ -122,12 +138,17 @@ func (s *InMemoryState) ApplyTrade(_ context.Context, portfolio uuid.UUID, symbo
 	} else {
 		balance = balance.Add(notional)
 	}
+	record, err := s.prepareHistoryLocked(portfolio, HistoryRecord{Kind: string(event.Kind), Symbol: symbol, Currency: event.Currency, Quantity: event.Quantity, UnitPrice: event.UnitPrice, Amount: notional, CashDelta: balance.Sub(s.cash[cashKey])})
+	if err != nil {
+		return domain.AccountPosition{}, err
+	}
 	updated.Currency = event.Currency
 	s.cash[cashKey] = balance
 	s.instrumentCurrencies[symbol] = event.Currency
 	s.positions[key] = updated
 	cmd.result = updated.Clone()
 	s.tradeKeys[idempotencyKey] = cmd
+	s.appendHistoryLocked(portfolio, record)
 	return updated.Clone(), nil
 }
 
@@ -196,8 +217,14 @@ func (s *InMemoryState) MoveCash(_ context.Context, portfolio uuid.UUID, currenc
 	} else {
 		balance = balance.Add(amount)
 	}
+	delta := balance.Sub(s.cash[key])
+	record, err := s.prepareHistoryLocked(portfolio, HistoryRecord{Kind: direction, Currency: currency, Amount: amount, CashDelta: delta, InvestorFlow: delta.Neg()})
+	if err != nil {
+		return decimal.Zero, err
+	}
 	s.cash[key] = balance
 	cmd.result = balance
 	s.cashKeys[idempotencyKey] = cmd
+	s.appendHistoryLocked(portfolio, record)
 	return balance, nil
 }

@@ -25,9 +25,13 @@ Go module1.22; native verification Go1.27.1 macOS arm64. Chi, `shopspring/decima
 
 The `/positions/{symbol}/trades` route now requires a key and returns the original snapshot on replay; changed payloads return 409. Its store is still separate from legacy trades/summary. `TestAccountingTradeHTTPReplayConflictAndRequiredKey`, `TestConcurrentTradeReplayAppliesOnce` and `TestAccountingEventsDoNotMutateInputLots` prove the bounded change. On macOS arm64 Go 1.27.1, `go test -p 2 ./... -race -count=1 -coverprofile=<ctl logs>/trade-replay.cover -cover` passed; domain 92.5%, weighted non-cmd 280/434 = 64.52%. Build, vet, empty gofmt and module tidy gates passed. Exact commit is recorded in the append-only lane STATUS (this checkpoint is part of that commit).
 
+### 2026-10-18 local command-history checkpoint
+
+Commit recorded in append-only STATUS. Build/vet/empty-gofmt/race/tidy/diff gates passed on Go1.27.1 macOS arm64. Domain95.7%; default unique non-cmd846/1012=83.60%; cross-package unique non-cmd932/1012=92.09% with `go test -p 2 ./... -race -count=1 -coverpkg=./... -coverprofile=<ctl logs>/history-all.cover`. Full evidence ctl `history-gates.log`. Deterministic tests prove timestamp/sequence ordering, investor-flow signs, rollback/recovery, historical isolation, bounded paging and100-way same-clock concurrent commands without synchronization sleeps. [ADR0004](../docs/adr/0004-local-command-history.md) documents memory cost, clock policy and no durable/HTTP NAV/return claim.
+
 ### 2026-10-18 corporate-action checkpoint
 
-Commit recorded in append-only STATUS. Full build/vet/empty-gofmt/race/tidy/diff gates passed on Go1.27.1 macOS arm64. Domain95.7%; default package-local non-cmd773/939=82.32%; combined cross-package unique non-cmd859/939=91.48% with `go test -p 2 ./... -race -count=1 -coverpkg=./... -coverprofile=<ctl logs>/corporate-all.cover`. `GOMAXPROCS=2 go test ./internal/domain -run='^$' -fuzz=FuzzCorporateSplitConservation -fuzztime=3s` passed156521 executions. Full evidence ctl `corporate-gates.log`; named DOD tests cover100-way HTTP/repository replay, fee contention/rollback and worked dividend/fee/split cash/valuation. [ADR0003](../docs/adr/0003-corporate-actions.md) states immediate/local/total-amount semantics and no price-history rewrite.
+`4c5061f`. Full build/vet/empty-gofmt/race/tidy/diff gates passed on Go1.27.1 macOS arm64. Domain95.7%; default package-local non-cmd773/939=82.32%; combined cross-package unique non-cmd859/939=91.48% with `go test -p 2 ./... -race -count=1 -coverpkg=./... -coverprofile=<ctl logs>/corporate-all.cover`. `GOMAXPROCS=2 go test ./internal/domain -run='^$' -fuzz=FuzzCorporateSplitConservation -fuzztime=3s` passed156521 executions. Full evidence ctl `corporate-gates.log`; named DOD tests cover100-way HTTP/repository replay, fee contention/rollback and worked dividend/fee/split cash/valuation. [ADR0003](../docs/adr/0003-corporate-actions.md) states immediate/local/total-amount semantics and no price-history rewrite.
 
 ### 2026-10-18 market-management checkpoint
 
@@ -47,7 +51,7 @@ Commit recorded in append-only STATUS. Full build/vet/empty-gofmt/race/tidy/diff
 
 ## Out of scope until implemented
 
-- Cash-inclusive historical NAV/return history, portfolio lifecycle and returns HTTP.
+- Cash-inclusive historical NAV/return use cases, portfolio lifecycle and history/returns HTTP.
 - External payment-backed funding and durable persistence.
 - A portfolio row. Any UUID is accepted. `migrations/001_init.sql` is not used by the server.
 

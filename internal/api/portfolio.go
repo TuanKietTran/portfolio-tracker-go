@@ -58,6 +58,8 @@ func portfolioID(r *http.Request) (uuid.UUID, error) {
 func writePortfolioError(w http.ResponseWriter, err error) {
 	status, code := 400, "invalid_request"
 	switch {
+	case errors.Is(err, repository.ErrHistoryClock):
+		status, code = 503, "history_clock_unavailable"
 	case errors.Is(err, repository.ErrNotFound):
 		status, code = 404, "not_found"
 	case errors.Is(err, command.ErrPriceManagementUnavailable):

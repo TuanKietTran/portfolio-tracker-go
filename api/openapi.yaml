@@ -17,7 +17,11 @@ info:
     are rejected with 400, oversized bodies with 413. Keys must be nonblank and at
     most 200 bytes. HTTP_ADDR defaults to :8105, CASH_MODE supports local only,
     COST_METHOD selects FIFO (default) or AVERAGE_COST. PAYMENTS_URL and DATABASE_URL
-    fail startup until their adapters are implemented.
+    fail startup until their adapters are implemented. New portfolio balance/holding
+    commands return503 without effect if the UTC history clock is invalid or moves
+    backwards for that portfolio; original successful-key replays remain available.
+    Portfolio mutations retain in-memory timestamped command/holding/cash history;
+    history/return HTTP routes are not yet implemented.
 servers:
   - url: http://localhost:8105
 paths:
@@ -153,6 +157,7 @@ paths:
         '400': { description: Invalid ID/key/action, unsupported/inexact split or missing held shares. }
         '404': { description: Unknown instrument or no previously held position. }
         '409': { description: Insufficient fee cash, key payload conflict or currency mismatch. }
+        '503': { description: History clock unavailable or regressed; no effect/key consumption. }
         '413': { description: Body exceeds 16384 bytes. }
   /v1/portfolios/{id}/trades:
     post:
@@ -181,6 +186,7 @@ paths:
           description: Invalid request, missing/disagreeing key or rejected oversell.
         '409':
           description: Idempotency key payload conflict or insufficient local cash.
+        '503': { description: History clock unavailable or regressed; no effect/key consumption. }
         '413': { description: Request body exceeds 16384 bytes. }
   /v1/portfolios/{id}/summary:
     get:
@@ -268,6 +274,7 @@ paths:
         '201': { description: Accounting trade accepted or same-payload replay; original position snapshot returned. }
         '400': { description: Invalid request, missing/disagreeing key or rejected oversell. }
         '409': { description: Insufficient cash or key reused with a different portfolio, symbol, currency, side, quantity or price. }
+        '503': { description: History clock unavailable or regressed; no effect/key consumption. }
         '413': { description: Request body exceeds 16384 bytes. }
   /v1/portfolios/{id}/cash:
     get:
@@ -298,7 +305,7 @@ paths:
         '400': { description: Invalid request. }
         '413': { description: Request body exceeds 16384 bytes. }
         '409': { description: Idempotency conflict or insufficient cash. }
-        '503': { description: Payment-backed cash boundary configured without safe recovery support; no transfer attempted. }
+        '503': { description: Unavailable/regressed history clock or unsafe payment boundary; no effect/key consumption/transfer. }
   /v1/portfolios/{id}/cash/withdraw:
     post:
       operationId: withdrawCash
@@ -316,7 +323,7 @@ paths:
         '400': { description: Invalid request. }
         '413': { description: Request body exceeds 16384 bytes. }
         '409': { description: Idempotency conflict or insufficient cash. }
-        '503': { description: Payment-backed cash boundary configured without safe recovery support; no transfer attempted. }
+        '503': { description: Unavailable/regressed history clock or unsafe payment boundary; no effect/key consumption/transfer. }
 components:
   parameters:
     MarketSymbol:

@@ -12,6 +12,8 @@ Met means implemented and asserted by named tests. This is a synthetic local-mem
 | Local settlement has explicit currency, precision and minor-unit rules | `TestCashAndTradeRejectUnsupportedCurrencyAndFractionalMinorUnits`, `TestRejectFractionalMinorUnitsPolicy` |
 | FIFO/average basis survives repeating splits/allocations and full sale | `TestPartialAllocationsCarryResidualUntilFinalSale`, `TestAverageFullLiquidationConsumesExactRemainingBasis` |
 | Positions require valid as-of price marks instead of zero placeholders | `TestSummaryDeterministicSortedMarkedSnapshot`, `TestPortfolioServiceTradesValuationAndLocalCash` |
+| Atomic timestamped/sequence-ordered command/holdings/cash history with isolated reads | `TestTimestampedCommandHistoryFlowsSnapshotsAndIsolation`, `TestConcurrentHistorySnapshotsAreOrderedAndAtomic` |
+| External investor flows exclude internal investment actions; clock failure/replay has no partial history | `TestHistoryClockFailureRollbackReplayAndRecovery`, `TestHistoryClockHTTPUnavailableHasNoEffectAndSameKeyCanRetry` |
 | Keyed atomic corporate split/dividend/fee commands with original snapshot replay | `TestCorporateWorkedDividendFeeAndSplit`, `TestCorporateHTTPConcurrentReplayCashAndWorkedValuation`, `TestCorporateConcurrentReplayOriginalSnapshotAndAtomicCash` |
 | Corporate fee contention cannot overdraw or partially apply failed commands | `TestConcurrentCorporateFeesCannotOverdrawAndFailureDoesNotConsumeKey`, `TestCorporateInvalidFieldsAndClosedHoldings` |
 | Keyed immutable instruments and historical marks with explicit cutoffs | `TestInstrumentAndPriceReplayImmutableHistoryAndConcurrency`, `TestMarketHTTPManagementAndHistoricalPortfolioValuation`, `TestReadOnlyFeedCompatibilityAndPublicationUnavailable` |
@@ -20,13 +22,13 @@ Met means implemented and asserted by named tests. This is a synthetic local-mem
 | Mutation bodies are bounded and reject unknown/trailing JSON | `TestStrictBoundedBodiesAndUniformErrors` |
 | Shutdown drains active work or forces bounded closure | `TestServeCancellationDrainsActiveRequest`, `TestServeErrorsAndForcedShutdown`; repeated race count10 passed |
 | Parsed OpenAPI paths/statuses match registered runtime routes | `TestOpenAPIParsesAndDeclaresImplementedRoutesAndStatuses` |
-| Domain >=90% and aggregate non-cmd >=80% statement coverage | 2026-10-18 macOS arm64 Go1.27.1: domain95.7%; `go test -p 2 ./... -race -count=1 -coverpkg=./... -coverprofile=coverage.out` aggregate859/939=91.48% unique non-cmd statements. Package-local instrumentation773/939=82.32%; not an unweighted mean. |
+| Domain >=90% and aggregate non-cmd >=80% statement coverage | 2026-10-18 macOS arm64 Go1.27.1: domain95.7%; `go test -p 2 ./... -race -count=1 -coverpkg=./... -coverprofile=coverage.out` aggregate932/1012=92.09% unique non-cmd statements. Package-local instrumentation846/1012=83.60%; not an unweighted mean. |
 
 ## Partial
 
 | Capability | Remaining scope |
 | --- | --- |
-| Returns | Pure TWR and bounded MWR methods tested; no HTTP or stored investor cash-flow history. |
+| Returns | Pure TWR/MWR and timestamped holdings/investor-flow history tested; no historical NAV/return use cases or HTTP yet. |
 | Documentation | README and two ADRs exist; full glossary/API examples/CI and milestone closure remain. |
 
 ## Unmet
