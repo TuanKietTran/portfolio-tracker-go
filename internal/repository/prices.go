@@ -10,6 +10,24 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+type PriceFeed interface {
+	Price(context.Context, string, string) (domain.Price, error)
+}
+type PriceSnapshotter interface{ SnapshotPrices() PriceFeed }
+
+// SnapshotPrices freezes all currently known marks for a consistent query view.
+func (f *StaticPriceFeed) SnapshotPrices() PriceFeed {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	copy := NewStaticPriceFeed()
+	for _, history := range f.prices {
+		for _, price := range history {
+			copy.set(price)
+		}
+	}
+	return copy
+}
+
 var ErrPriceUnavailable = errors.New("price unavailable at or before requested timestamp")
 
 // StaticPriceFeed retains deterministic historical marks. It is memory-only.

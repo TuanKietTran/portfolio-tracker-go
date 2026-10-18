@@ -25,9 +25,13 @@ Go module1.22; native verification Go1.27.1 macOS arm64. Chi, `shopspring/decima
 
 The `/positions/{symbol}/trades` route now requires a key and returns the original snapshot on replay; changed payloads return 409. Its store is still separate from legacy trades/summary. `TestAccountingTradeHTTPReplayConflictAndRequiredKey`, `TestConcurrentTradeReplayAppliesOnce` and `TestAccountingEventsDoNotMutateInputLots` prove the bounded change. On macOS arm64 Go 1.27.1, `go test -p 2 ./... -race -count=1 -coverprofile=<ctl logs>/trade-replay.cover -cover` passed; domain 92.5%, weighted non-cmd 280/434 = 64.52%. Build, vet, empty gofmt and module tidy gates passed. Exact commit is recorded in the append-only lane STATUS (this checkpoint is part of that commit).
 
+### 2026-10-19 bounded portfolio-return checkpoint
+
+Commit recorded in STATUS. Full build/vet/empty-gofmt/race/tidy/diff gates passed on Go1.27.1 macOS arm64; evidence ctl `returns-gates.log`. Domain95.0%; default non-cmd1127/1295=87.03%; cross-package unique non-cmd1209/1295=93.36% with `go test -p 2 ./... -race -count=1 -coverpkg=./... -coverprofile=<ctl logs>/returns-all.cover`. `GOMAXPROCS=2 go test ./internal/domain -run='^$' -fuzz=FuzzGuardedIRROneYearAnalytic -fuzztime=3s` passed26156 executions. Named tests prove analytic/same-time-fee returns, frozen views, work/precision limits and explicit numerical failure. ADR0006 documents supported periods/capital/sign patterns and computed-model diagnostics, not formal Pow error certification.
+
 ### 2026-10-18 historical NAV checkpoint
 
-Commit recorded in STATUS. Full build/vet/empty-gofmt/race/tidy/diff gates passed on Go1.27.1 macOS arm64; evidence ctl `nav-gates.log`. Domain95.7%; default non-cmd908/1073=84.62%; cross-package unique non-cmd994/1073=92.64% with `go test -p 2 ./... -race -count=1 -coverpkg=./... -coverprofile=<ctl logs>/nav-all.cover`. Actual router/unit tests prove earlier holdings after later sale, exact fractional cutoff behavior, cash-only/closed books, sorted values, unsupported FX and missing/stale/future marks. ADR0005 defines precise cutoff and price-revision semantics. No return-rate/durable/external-cash claim.
+`a0fad91`. Full build/vet/empty-gofmt/race/tidy/diff gates passed on Go1.27.1 macOS arm64; evidence ctl `nav-gates.log`. Domain95.7%; default non-cmd908/1073=84.62%; cross-package unique non-cmd994/1073=92.64% with `go test -p 2 ./... -race -count=1 -coverpkg=./... -coverprofile=<ctl logs>/nav-all.cover`. Actual router/unit tests prove earlier holdings after later sale, exact fractional cutoff behavior, cash-only/closed books, sorted values, unsupported FX and missing/stale/future marks. ADR0005 defines precise cutoff and price-revision semantics. No return-rate/durable/external-cash claim.
 
 ### 2026-10-18 local command-history checkpoint
 
@@ -55,7 +59,7 @@ Commit recorded in STATUS. Full build/vet/empty-gofmt/race/tidy/diff gates passe
 
 ## Out of scope until implemented
 
-- TWR/MWR return use cases, portfolio lifecycle and raw-history/returns HTTP.
+- Generalized zero-capital/multiple-IRR cases, portfolio lifecycle and raw-history HTTP.
 - External payment-backed funding and durable persistence.
 - A portfolio row. Any UUID is accepted. `migrations/001_init.sql` is not used by the server.
 

@@ -30,6 +30,7 @@ func (h *PortfolioHandlers) Routes() chi.Router {
 	r.Post("/portfolios/{id}/corporate-actions", h.corporateAction)
 	r.Get("/portfolios/{id}/summary", h.summary)
 	r.Get("/portfolios/{id}/valuation", h.valuation)
+	r.Get("/portfolios/{id}/returns", h.returns)
 	r.Get("/portfolios/{id}/positions/{symbol}", h.position)
 	r.Post("/portfolios/{id}/positions/{symbol}/trades", h.trade)
 	r.Get("/portfolios/{id}/cash", h.cash)
@@ -59,6 +60,8 @@ func portfolioID(r *http.Request) (uuid.UUID, error) {
 func writePortfolioError(w http.ResponseWriter, err error) {
 	status, code := 400, "invalid_request"
 	switch {
+	case errors.Is(err, command.ErrReturnsUnavailable):
+		status, code = 503, "returns_unavailable"
 	case errors.Is(err, repository.ErrHistoryClock):
 		status, code = 503, "history_clock_unavailable"
 	case errors.Is(err, repository.ErrNotFound):

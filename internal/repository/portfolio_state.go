@@ -16,6 +16,7 @@ var ErrIdempotencyConflict = errors.New("idempotency key payload conflict")
 
 // PortfolioState is the atomic persistence boundary for positions and portfolio cash.
 type PortfolioState interface {
+	ReturnWindow(context.Context, uuid.UUID, time.Time, time.Time) (ReturnWindow, error)
 	History(context.Context, uuid.UUID, uint64, int) ([]HistoryRecord, error)
 	SnapshotAt(context.Context, uuid.UUID, time.Time) (PortfolioSnapshot, error)
 	RegisterInstrument(context.Context, domain.Instrument, string) (domain.Instrument, error)

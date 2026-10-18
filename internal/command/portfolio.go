@@ -13,9 +13,7 @@ import (
 )
 
 // PriceFeed is injected so tests and local runs use deterministic marks.
-type PriceFeed interface {
-	Price(context.Context, string, string) (domain.Price, error)
-}
+type PriceFeed = repository.PriceFeed
 
 type PriceFunc func(context.Context, string, string) (domain.Price, error)
 

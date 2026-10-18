@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/TuanKietTran/portfolio-tracker-go/internal/domain"
+	"github.com/TuanKietTran/portfolio-tracker-go/internal/repository"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 )
@@ -47,6 +48,10 @@ func (s *PortfolioService) Valuation(ctx context.Context, portfolio uuid.UUID, c
 	if err != nil {
 		return HistoricalValuation{}, err
 	}
+	return s.valueSnapshot(ctx, snapshot, currency, asOf, maxAge)
+}
+
+func (s *PortfolioService) valueSnapshot(ctx context.Context, snapshot repository.PortfolioSnapshot, currency string, asOf time.Time, maxAge int64) (HistoricalValuation, error) {
 	for denomination, balance := range snapshot.Cash {
 		if balance.IsNegative() {
 			return HistoricalValuation{}, errors.New("negative historical cash balance")

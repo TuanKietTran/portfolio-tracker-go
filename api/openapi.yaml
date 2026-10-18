@@ -9,7 +9,7 @@ info:
     Position and summary holdings are current snapshots; as_of selects historical
     price marks only, not historical holdings or trade-event replay. FX conversion
     and cross-currency aggregation are not implemented.
-    Keyed corporate split/dividend/fee actions are callable; returns routes are not yet callable.
+    Keyed corporate split/dividend/fee actions and bounded historical TWR/MWR queries are callable.
     The original in-process playback exercises a separate legacy compatibility adapter.
     All production responses include X-Request-ID. Errors use the Error schema;
     common runtime errors are 404 (route), 405 (method) and 500 (panic before response).
@@ -22,7 +22,7 @@ info:
     backwards for that portfolio; original successful-key replays remain available.
     Portfolio mutations retain in-memory timestamped command/holding/cash history;
     historical cash-inclusive NAV is callable at /v1/portfolios/{id}/valuation.
-    Raw history and return HTTP routes are not yet implemented.
+    Raw history HTTP routes are not yet implemented.
 servers:
   - url: http://localhost:8105
 paths:
@@ -189,6 +189,70 @@ paths:
           description: Idempotency key payload conflict or insufficient local cash.
         '503': { description: History clock unavailable or regressed; no effect/key consumption. }
         '413': { description: Request body exceeds 16384 bytes. }
+  /v1/portfolios/{id}/returns:
+    get:
+      operationId: getHistoricalReturns
+      description: >-
+        Single-currency historical return from frozen holdings/flow and price views.
+        from/to are exact starts of positive Unix seconds; require from<to within3650
+        days. Start NAV includes all commands at from; only investor FUND/WITHDRAW
+        flows in(from,to] are included, so starting capital is not double counted.
+        Maximum4096 portfolio commands and256 external flows per window. Every start,
+        end and external-flow snapshot requires eligible fresh marks for held shares.
+        Same-time flows use individual command snapshots/sequence, not final timestamp
+        holdings. Dividends, fees, splits and trading are internal investment effects.
+        TWR geometrically links pre-flow NAV/previous post-flow NAV, then ending NAV;
+        ratios and final rate round half away from zero at18 places. TWR is a period
+        rate, not annualized, and requires strictly positive start/end and pre/post-flow
+        NAV; zero-capital/total-loss windows are rejected rather than guessed.
+        MWR is annualized ACT/365 fixed elapsed seconds, bounded bisection on
+        [-0.999999999999,10]. Cash projections round to18 fractional places and must fit the supported
+        canonical30-coefficient-digit/exponent -18..18 decimal bounds; amounts
+        never pass through float64, while year fractions/discount factors use float64
+        math.Pow. Equal model-time flows are netted. Require a conventional negative
+        then positive sign pattern; potentially multiple-IRR patterns are rejected.
+        BOTH computed absolute NPV residual and rate-bracket width must satisfy their
+        tolerances (or computed exact root). Diagnostics bound the computed numerical
+        model, not formal real-arithmetic Pow error. Nonconvergence/outside bracket,
+        unsupported FX/capital/pattern, query limits or missing/stale data returns400
+        with no partial rate. Later historical mark insertion may revise results.
+      parameters:
+        - { $ref: '#/components/parameters/PortfolioId' }
+        - { $ref: '#/components/parameters/ValuationCurrency' }
+        - { $ref: '#/components/parameters/ValuationMaxAge' }
+        - name: from
+          in: query
+          required: true
+          schema: { type: integer, format: int64, minimum: 1 }
+        - name: to
+          in: query
+          required: true
+          schema: { type: integer, format: int64, minimum: 1, maximum: 253402300799 }
+        - name: method
+          in: query
+          required: true
+          schema: { type: string, enum: [TWR, MWR] }
+        - name: rate_tolerance
+          in: query
+          description: MWR only; decimal fraction1e-12..1e-3, at most64 input characters.
+          schema: { type: string, default: '0.0000000001' }
+        - name: npv_tolerance
+          in: query
+          description: MWR only; computed residual tolerance in currency units1e-12..0.01.
+          schema: { type: string, default: '0.00000001' }
+        - name: max_iterations
+          in: query
+          description: MWR only; supplying any solver option with TWR is400.
+          schema: { type: integer, minimum: 1, maximum: 256, default: 128 }
+      responses:
+        '200':
+          description: Period TWR or annualized MWR with explicit NAV/flow/numeric diagnostics.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortfolioReturn' }
+        '400': { description: Invalid/undefined/ambiguous/unbracketed/nonconvergent or stale/unsupported data; no partial rate. }
+        '404': { description: No eligible starting historical portfolio snapshot. }
+        '503': { description: Injected price adapter cannot provide a frozen price view. }
   /v1/portfolios/{id}/valuation:
     get:
       operationId: getHistoricalValuation
@@ -395,6 +459,32 @@ components:
         type: string
         format: uuid
   schemas:
+    PortfolioReturn:
+      type: object
+      required: [currency, from, to, method, rate, annualized, start_nav, end_nav, external_flows]
+      properties:
+        currency: { type: string }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        method: { type: string, enum: [TWR, MWR] }
+        rate: { type: string, description: Decimal fraction;0.1 means10 percent. }
+        annualized: { type: boolean }
+        year_basis: { type: string, description: Present for MWR;ACT/365 fixed seconds. }
+        start_nav: { type: string }
+        end_nav: { type: string }
+        external_flows: { type: integer }
+        subperiods: { type: integer, description: Present for TWR. }
+        solver:
+          type: object
+          description: Present for MWR; diagnostics of the computed numerical model.
+          properties:
+            method: { type: string }
+            iterations: { type: integer }
+            max_iterations: { type: integer }
+            rate_tolerance: { type: string }
+            npv_tolerance: { type: string }
+            npv_residual: { type: string }
+            rate_bracket_width: { type: string }
     HistoricalValuation:
       type: object
       required: [currency, as_of, cash, securities_value, net_asset_value, cost_basis, realized_pnl, unrealized_pnl, positions]

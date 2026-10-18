@@ -12,6 +12,8 @@ Met means implemented and asserted by named tests. This is a synthetic local-mem
 | Local settlement has explicit currency, precision and minor-unit rules | `TestCashAndTradeRejectUnsupportedCurrencyAndFractionalMinorUnits`, `TestRejectFractionalMinorUnitsPolicy` |
 | FIFO/average basis survives repeating splits/allocations and full sale | `TestPartialAllocationsCarryResidualUntilFinalSale`, `TestAverageFullLiquidationConsumesExactRemainingBasis` |
 | Positions require valid as-of price marks instead of zero placeholders | `TestSummaryDeterministicSortedMarkedSnapshot`, `TestPortfolioServiceTradesValuationAndLocalCash` |
+| Supported historical TWR/MWR windows preserve flow timing and computed convergence bounds | `TestHistoricalReturnsWorkedFlowAndAnalyticIRR`, `TestSameTimeFlowsUseIndividualSnapshotsAndFeesAreInternal`, `TestGuardedIRRAnalyticConvergenceAndSameTimeAggregation`, `TestReturnHTTPAnalyticRatesDiagnosticsValidationAndNoPartialFailure` |
+| Return input windows/price views are frozen and bounded | `TestReturnQueryFreezesBookAndPriceViews`, `TestConsistentReturnWindowBoundaryTiesAndIsolation`, `TestReturnWindowWorkBoundsAndFrozenPriceHistory` |
 | Historical cash-inclusive NAV uses historical holdings and fresh marks, not current state | `TestHistoricalNAVUsesEarlierHoldingsAndCashAfterFullSale`, `TestHistoricalNAVHTTPExactCutoffClosedHoldingsAndNoFutureLeakage`, `TestHistoricalNAVRejectsInvalidDataAndMarksWithoutPartialResults` |
 | Atomic timestamped/sequence-ordered command/holdings/cash history with isolated reads | `TestTimestampedCommandHistoryFlowsSnapshotsAndIsolation`, `TestConcurrentHistorySnapshotsAreOrderedAndAtomic` |
 | External investor flows exclude internal investment actions; clock failure/replay has no partial history | `TestHistoryClockFailureRollbackReplayAndRecovery`, `TestHistoryClockHTTPUnavailableHasNoEffectAndSameKeyCanRetry` |
@@ -23,14 +25,14 @@ Met means implemented and asserted by named tests. This is a synthetic local-mem
 | Mutation bodies are bounded and reject unknown/trailing JSON | `TestStrictBoundedBodiesAndUniformErrors` |
 | Shutdown drains active work or forces bounded closure | `TestServeCancellationDrainsActiveRequest`, `TestServeErrorsAndForcedShutdown`; repeated race count10 passed |
 | Parsed OpenAPI paths/statuses match registered runtime routes | `TestOpenAPIParsesAndDeclaresImplementedRoutesAndStatuses` |
-| Domain >=90% and aggregate non-cmd >=80% statement coverage | 2026-10-18 macOS arm64 Go1.27.1: domain95.7%; `go test -p 2 ./... -race -count=1 -coverpkg=./... -coverprofile=coverage.out` aggregate994/1073=92.64% unique non-cmd statements. Package-local instrumentation908/1073=84.62%; not an unweighted mean. |
+| Domain >=90% and aggregate non-cmd >=80% statement coverage | 2026-10-19 macOS arm64 Go1.27.1: domain95.0%; `go test -p 2 ./... -race -count=1 -coverpkg=./... -coverprofile=coverage.out` aggregate1209/1295=93.36% unique non-cmd statements. Package-local instrumentation1127/1295=87.03%; not an unweighted mean. |
 
 ## Partial
 
 | Capability | Remaining scope |
 | --- | --- |
-| Returns | Pure TWR/MWR and timestamped holdings/investor-flow history tested; historical NAV is implemented; actual TWR/MWR return use cases/HTTP remain. |
-| Documentation | README and two ADRs exist; full glossary/API examples/CI and milestone closure remain. |
+| Generalized returns | Bounded TWR/conventional MWR use cases/HTTP are tested; zero-capital/total-loss TWR and nonconventional IRR are explicitly rejected. No formal float-discount ULP certification claimed. |
+| Documentation | README, API examples and ADRs exist; full glossary/CI and milestone closure remain. |
 
 ## Unmet
 
