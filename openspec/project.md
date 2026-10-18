@@ -25,9 +25,13 @@ Go module1.22; native verification Go1.27.1 macOS arm64. Chi, `shopspring/decima
 
 The `/positions/{symbol}/trades` route now requires a key and returns the original snapshot on replay; changed payloads return 409. Its store is still separate from legacy trades/summary. `TestAccountingTradeHTTPReplayConflictAndRequiredKey`, `TestConcurrentTradeReplayAppliesOnce` and `TestAccountingEventsDoNotMutateInputLots` prove the bounded change. On macOS arm64 Go 1.27.1, `go test -p 2 ./... -race -count=1 -coverprofile=<ctl logs>/trade-replay.cover -cover` passed; domain 92.5%, weighted non-cmd 280/434 = 64.52%. Build, vet, empty gofmt and module tidy gates passed. Exact commit is recorded in the append-only lane STATUS (this checkpoint is part of that commit).
 
+### 2026-10-18 historical NAV checkpoint
+
+Commit recorded in STATUS. Full build/vet/empty-gofmt/race/tidy/diff gates passed on Go1.27.1 macOS arm64; evidence ctl `nav-gates.log`. Domain95.7%; default non-cmd908/1073=84.62%; cross-package unique non-cmd994/1073=92.64% with `go test -p 2 ./... -race -count=1 -coverpkg=./... -coverprofile=<ctl logs>/nav-all.cover`. Actual router/unit tests prove earlier holdings after later sale, exact fractional cutoff behavior, cash-only/closed books, sorted values, unsupported FX and missing/stale/future marks. ADR0005 defines precise cutoff and price-revision semantics. No return-rate/durable/external-cash claim.
+
 ### 2026-10-18 local command-history checkpoint
 
-Commit recorded in append-only STATUS. Build/vet/empty-gofmt/race/tidy/diff gates passed on Go1.27.1 macOS arm64. Domain95.7%; default unique non-cmd846/1012=83.60%; cross-package unique non-cmd932/1012=92.09% with `go test -p 2 ./... -race -count=1 -coverpkg=./... -coverprofile=<ctl logs>/history-all.cover`. Full evidence ctl `history-gates.log`. Deterministic tests prove timestamp/sequence ordering, investor-flow signs, rollback/recovery, historical isolation, bounded paging and100-way same-clock concurrent commands without synchronization sleeps. [ADR0004](../docs/adr/0004-local-command-history.md) documents memory cost, clock policy and no durable/HTTP NAV/return claim.
+`28c2a5c`. Build/vet/empty-gofmt/race/tidy/diff gates passed on Go1.27.1 macOS arm64. Domain95.7%; default unique non-cmd846/1012=83.60%; cross-package unique non-cmd932/1012=92.09% with `go test -p 2 ./... -race -count=1 -coverpkg=./... -coverprofile=<ctl logs>/history-all.cover`. Full evidence ctl `history-gates.log`. Deterministic tests prove timestamp/sequence ordering, investor-flow signs, rollback/recovery, historical isolation, bounded paging and100-way same-clock concurrent commands without synchronization sleeps. [ADR0004](../docs/adr/0004-local-command-history.md) documents memory cost, clock policy and no durable/HTTP NAV/return claim.
 
 ### 2026-10-18 corporate-action checkpoint
 
@@ -51,7 +55,7 @@ Commit recorded in append-only STATUS. Build/vet/empty-gofmt/race/tidy/diff gate
 
 ## Out of scope until implemented
 
-- Cash-inclusive historical NAV/return use cases, portfolio lifecycle and history/returns HTTP.
+- TWR/MWR return use cases, portfolio lifecycle and raw-history/returns HTTP.
 - External payment-backed funding and durable persistence.
 - A portfolio row. Any UUID is accepted. `migrations/001_init.sql` is not used by the server.
 

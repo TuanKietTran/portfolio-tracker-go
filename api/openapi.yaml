@@ -21,7 +21,8 @@ info:
     commands return503 without effect if the UTC history clock is invalid or moves
     backwards for that portfolio; original successful-key replays remain available.
     Portfolio mutations retain in-memory timestamped command/holding/cash history;
-    history/return HTTP routes are not yet implemented.
+    historical cash-inclusive NAV is callable at /v1/portfolios/{id}/valuation.
+    Raw history and return HTTP routes are not yet implemented.
 servers:
   - url: http://localhost:8105
 paths:
@@ -188,6 +189,39 @@ paths:
           description: Idempotency key payload conflict or insufficient local cash.
         '503': { description: History clock unavailable or regressed; no effect/key consumption. }
         '413': { description: Request body exceeds 16384 bytes. }
+  /v1/portfolios/{id}/valuation:
+    get:
+      operationId: getHistoricalValuation
+      description: >-
+        Cash-inclusive historical NAV from the final committed holdings/cash snapshot
+        at or before the EXACT beginning of as_of Unix second, greatest sequence on
+        timestamp ties. A command at second110 plus750ns is not included by as_of110,
+        but is included by as_of111. Response as_of is canonical UTC date-time.
+        Uses latest currently known price mark at/before cutoff with required max_age;
+        late historical mark insertion may revise valuations. Never values current
+        holdings as a substitute for past holdings. Single currency only: reject any
+        position of another denomination or nonzero cash in another currency; no FX.
+        Closed zero-quantity/basis positions retain realized PnL but need no mark and
+        return price_as_of null. Cash-only portfolios need no prices. No eligible
+        snapshot is404; missing/future-only/stale mark is400, never an invented zero.
+        Existing summary/position routes retain their current-holdings semantics.
+      parameters:
+        - { $ref: '#/components/parameters/PortfolioId' }
+        - { $ref: '#/components/parameters/ValuationCurrency' }
+        - name: as_of
+          in: query
+          required: true
+          description: Exact UTC instant at start of this positive Unix second, not end-of-second rounding.
+          schema: { type: integer, format: int64, minimum: 1, maximum: 253402300799 }
+        - { $ref: '#/components/parameters/ValuationMaxAge' }
+      responses:
+        '200':
+          description: Historical cash, securities and NAV with sorted holding values.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HistoricalValuation' }
+        '400': { description: Invalid query/UUID/currency, unsupported FX, invalid snapshot or missing/future/stale price. }
+        '404': { description: No historical portfolio snapshot at/before cutoff. }
   /v1/portfolios/{id}/summary:
     get:
       operationId: getPortfolioSummary
@@ -361,6 +395,31 @@ components:
         type: string
         format: uuid
   schemas:
+    HistoricalValuation:
+      type: object
+      required: [currency, as_of, cash, securities_value, net_asset_value, cost_basis, realized_pnl, unrealized_pnl, positions]
+      properties:
+        currency: { type: string, enum: [USD, EUR, GBP, JPY] }
+        as_of: { type: string, format: date-time, description: Exact requested cutoff in canonical UTC. }
+        cash: { type: string }
+        securities_value: { type: string }
+        net_asset_value: { type: string, description: Cash plus securities value; no float or currency conversion. }
+        cost_basis: { type: string }
+        realized_pnl: { type: string }
+        unrealized_pnl: { type: string }
+        positions:
+          type: array
+          description: Symbol-sorted historical holdings, including previously held closed positions.
+          items:
+            type: object
+            properties:
+              symbol: { type: string }
+              quantity: { type: string }
+              cost_basis: { type: string }
+              realized_pnl: { type: string }
+              market_value: { type: string }
+              unrealized_pnl: { type: string }
+              price_as_of: { type: integer, format: int64, nullable: true, description: Selected mark seconds or null if zero shares require no mark. }
     CorporateAction:
       type: object
       additionalProperties: false

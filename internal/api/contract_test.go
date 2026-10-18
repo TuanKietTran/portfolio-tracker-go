@@ -30,6 +30,7 @@ func TestOpenAPIParsesAndDeclaresImplementedRoutesAndStatuses(t *testing.T) {
 		t.Fatalf("parse OpenAPI: %v", err)
 	}
 	want := map[string]map[string][]string{
+		"/v1/portfolios/{id}/valuation":                 {"get": {"200", "400", "404"}},
 		"/v1/portfolios/{id}/corporate-actions":         {"post": {"201", "400", "404", "409", "413", "503"}},
 		"/v1/instruments":                               {"post": {"201", "400", "409", "413"}},
 		"/v1/instruments/{symbol}":                      {"get": {"200", "404"}},
