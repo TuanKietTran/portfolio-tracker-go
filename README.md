@@ -2,6 +2,8 @@
 
 Synthetic investment accounting in Go: FIFO/average-cost domain lots, realized/unrealized P&L, deterministic price marks and local cash. No real money or credentials.
 
+See the [architecture decision index](docs/adr/README.md).
+
 ## Run and verify
 
 ```sh
