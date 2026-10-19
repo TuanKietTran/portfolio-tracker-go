@@ -39,7 +39,8 @@ func failFirst(next http.Handler) http.Handler {
 	})
 }
 
-func TestThousandPerMinuteAndPlayback(t *testing.T) {
+func TestLegacyThousandPerMinuteAndPlayback(t *testing.T) {
+	const legacyCalls = 1000
 	repo := repository.NewInMemoryPortfolio()
 	h := api.NewHandlers(command.NewRecordTradeHandler(repo), query.NewGetSummaryHandler(repo))
 	router := chi.NewRouter()
@@ -50,7 +51,7 @@ func TestThousandPerMinuteAndPlayback(t *testing.T) {
 
 	id := uuid.New()
 	path := "/v1/portfolios/" + id.String() + "/trades"
-	calls := make([]Call, RequestsPerMinute)
+	calls := make([]Call, legacyCalls)
 	for i := range calls {
 		calls[i] = Call{
 			Method: http.MethodPost,
@@ -74,7 +75,7 @@ func TestThousandPerMinuteAndPlayback(t *testing.T) {
 			t.Fatalf("call %d status %d attempts %d err %v body %s", i, o.Status, o.Attempts, o.Err, o.Body)
 		}
 	}
-	assertQty(t, srv, id, decimal.NewFromInt(RequestsPerMinute))
+	assertQty(t, srv, id, decimal.NewFromInt(legacyCalls))
 
 	second, err := Play(context.Background(), srv.Client(), srv.URL, calls, DefaultPolicy())
 	if err != nil {
@@ -85,7 +86,7 @@ func TestThousandPerMinuteAndPlayback(t *testing.T) {
 			t.Fatalf("playback %d status %d attempts %d body %s", i, o.Status, o.Attempts, o.Body)
 		}
 	}
-	assertQty(t, srv, id, decimal.NewFromInt(RequestsPerMinute))
+	assertQty(t, srv, id, decimal.NewFromInt(legacyCalls))
 }
 
 func TestTradeWithoutKeyAppliesEveryTime(t *testing.T) {

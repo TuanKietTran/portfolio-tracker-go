@@ -2,22 +2,23 @@
 
 ## Purpose
 
-Trade playback sends 1000 keyed buys of 1 ACME at 10. The first play returns HTTP 201 and the quantity is 1000. The second play is an idempotent rejection and the quantity stays 1000. A buy with no key still applies on every post.
+Bounded loopback HTTP replay validates the production router, transient failure recovery, idempotent duplicate effects, and terminal outcomes inside a fixed request window. The historical 1,000-call legacy adapter replay remains a separate regression only.
 
 ## Requirements
 
-### Requirement: Finish 1000 requests inside one minute
-The playback client SHALL complete 1000 recorded calls in less than 60 seconds, including one transient failure and a successful retry on each call.
+### Requirement: Finish 10,000 production-router requests inside one minute
+The playback client SHALL complete 10,000 recorded calls in less than 60 seconds against the production API router over a real loopback HTTP listener. Playback SHALL use bounded concurrency and a separately bounded overall context.
 
-#### Scenario: Burst with one 503 per call
-- **GIVEN** the server returns HTTP 503 on the first attempt of each distinct body and then succeeds
-- **WHEN** the client plays 1000 calls with at most 3 attempts
-- **THEN** every call ends on the success status
-- **AND** each call took 2 attempts
-- **AND** the play finishes in under 60 seconds
+#### Scenario: Faulted duplicate trade burst
+- **GIVEN** 9,800 unique keyed trade commands and 200 additional submissions repeating an existing key and identical body
+- **AND** at least 5% of requests receive injected 503, some receive 429, and 1% experience per-attempt timeouts
+- **WHEN** the production router is replayed using at most 6 attempts and capped exponential full jitter
+- **THEN** every request reaches a terminal 201 response in under 60 seconds
+- **AND** each unique trade is applied exactly once
+- **AND** cash and position state reflect the 9,800 unique effects
 
 ### Requirement: Retry only transient failures
-The client SHALL retry a transport error or HTTP 408, 429, or 5xx, and SHALL NOT retry any other status.
+The client SHALL retry transport errors and HTTP 408, 429, or 5xx with at most 6 attempts and capped exponential full jitter, and SHALL NOT retry any other status. Per-attempt timeout SHALL be retryable while the overall replay context remains live; overall cancellation SHALL be final.
 
 #### Scenario: HTTP 400 is final
 - **WHEN** the server returns HTTP 400
@@ -28,11 +29,5 @@ The client SHALL retry a transport error or HTTP 408, 429, or 5xx, and SHALL NOT
 - **THEN** the client stops after 2 attempts
 - **AND** the outcome status is 503
 
-### Requirement: Playback does not repeat the effect
-Playing the same call list again SHALL NOT apply a successful idempotent write a second time. A stateless read SHALL return the same body.
-
-#### Scenario: Second play
-- **GIVEN** the first play of 1000 calls succeeded
-- **WHEN** the client plays that same list again
-- **THEN** stored totals are unchanged
-- **AND** each outcome is either the same success body or HTTP 400 containing `idempotency key already used`
+### Requirement: Retain legacy adapter playback independently
+The historical 1,000-call legacy adapter regression SHALL remain separately tested and SHALL NOT count as production-router replay evidence.

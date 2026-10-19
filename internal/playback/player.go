@@ -5,24 +5,24 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math/rand"
 	"net/http"
+	"sync"
 	"time"
 )
 
-// RequestsPerMinute is the throughput the playback client must finish inside Window.
 const (
-	RequestsPerMinute = 1000
+	RequestsPerMinute = 10000
 	Window            = time.Minute
 )
 
-// Call is one recorded HTTP request. Playback sends the same value again.
 type Call struct {
 	Method string
 	Path   string
 	Body   []byte
+	Header map[string]string
 }
 
-// Outcome is the last attempt for a call.
 type Outcome struct {
 	Status   int
 	Body     []byte
@@ -30,14 +30,16 @@ type Outcome struct {
 	Err      error
 }
 
-// Policy controls retries. Only transport errors and HTTP 408, 429, and 5xx are retried.
 type Policy struct {
-	MaxAttempts int
-	BaseDelay   time.Duration
+	MaxAttempts    int
+	BaseDelay      time.Duration
+	MaxDelay       time.Duration
+	AttemptTimeout time.Duration
+	Concurrency    int
 }
 
 func DefaultPolicy() Policy {
-	return Policy{MaxAttempts: 3}
+	return Policy{MaxAttempts: 6, BaseDelay: 50 * time.Millisecond, MaxDelay: 2 * time.Second, AttemptTimeout: 5 * time.Second, Concurrency: 32}
 }
 
 func Retryable(status int) bool {
@@ -48,7 +50,9 @@ func IsIdempotentReplay(status int, body []byte) bool {
 	return status == http.StatusBadRequest && bytes.Contains(body, []byte("idempotency key already used"))
 }
 
-// Play sends calls in order. A later Play of the same slice is a playback.
+// Play sends calls with bounded concurrency. Per-attempt deadlines are distinct
+// from the overall context, so a timed-out request can be retried while its
+// replay window remains open.
 func Play(ctx context.Context, client *http.Client, baseURL string, calls []Call, policy Policy) ([]Outcome, error) {
 	if client == nil {
 		client = http.DefaultClient
@@ -56,10 +60,44 @@ func Play(ctx context.Context, client *http.Client, baseURL string, calls []Call
 	if policy.MaxAttempts < 1 {
 		policy.MaxAttempts = 1
 	}
+	if policy.Concurrency < 1 {
+		policy.Concurrency = 1
+	}
+	if policy.MaxDelay <= 0 {
+		policy.MaxDelay = 2 * time.Second
+	}
 	out := make([]Outcome, len(calls))
-	for i, call := range calls {
-		outcome, err := playOne(ctx, client, baseURL, call, policy)
-		out[i] = outcome
+	callErrors := make([]error, len(calls))
+	jobs := make(chan int)
+	workers := policy.Concurrency
+	if workers > len(calls) {
+		workers = len(calls)
+	}
+	var wg sync.WaitGroup
+	for n := 0; n < workers; n++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				out[i], callErrors[i] = playOne(ctx, client, baseURL, calls[i], policy)
+			}
+		}()
+	}
+	for i := range calls {
+		select {
+		case <-ctx.Done():
+			close(jobs)
+			wg.Wait()
+			return out, ctx.Err()
+		case jobs <- i:
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	if err := ctx.Err(); err != nil {
+		return out, err
+	}
+	for _, err := range callErrors {
 		if err != nil {
 			return out, err
 		}
@@ -74,7 +112,12 @@ func playOne(ctx context.Context, client *http.Client, baseURL string, call Call
 			return last, err
 		}
 		if attempt > 1 && policy.BaseDelay > 0 {
-			delay := policy.BaseDelay << (attempt - 2)
+			capDelay := policy.BaseDelay << (attempt - 2)
+			if capDelay > policy.MaxDelay || capDelay < 0 {
+				capDelay = policy.MaxDelay
+			}
+			// Full jitter samples uniformly from [0, the exponential cap].
+			delay := time.Duration(rand.Int63n(int64(capDelay) + 1))
 			timer := time.NewTimer(delay)
 			select {
 			case <-ctx.Done():
@@ -83,28 +126,45 @@ func playOne(ctx context.Context, client *http.Client, baseURL string, call Call
 			case <-timer.C:
 			}
 		}
-		req, err := http.NewRequestWithContext(ctx, call.Method, baseURL+call.Path, bytes.NewReader(call.Body))
+		attemptCtx := ctx
+		cancel := func() {}
+		if policy.AttemptTimeout > 0 {
+			attemptCtx, cancel = context.WithTimeout(ctx, policy.AttemptTimeout)
+		}
+		req, err := http.NewRequestWithContext(attemptCtx, call.Method, baseURL+call.Path, bytes.NewReader(call.Body))
 		if err != nil {
+			cancel()
 			return last, err
 		}
 		if len(call.Body) > 0 {
 			req.Header.Set("Content-Type", "application/json")
+		}
+		for key, value := range call.Header {
+			req.Header.Set(key, value)
 		}
 		resp, err := client.Do(req)
 		last.Attempts = attempt
 		if err != nil {
 			last.Err = err
 			last.Status = 0
+			cancel()
+			if ctx.Err() != nil {
+				return last, ctx.Err()
+			}
 			if attempt == policy.MaxAttempts || !retryableErr(err) {
 				return last, nil
 			}
 			continue
 		}
 		body, readErr := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
+		cancel()
 		if readErr != nil {
 			last.Err = readErr
 			last.Status = resp.StatusCode
+			if ctx.Err() != nil {
+				return last, ctx.Err()
+			}
 			if attempt == policy.MaxAttempts || !retryableErr(readErr) {
 				return last, nil
 			}
@@ -121,5 +181,5 @@ func playOne(ctx context.Context, client *http.Client, baseURL string, call Call
 }
 
 func retryableErr(err error) bool {
-	return err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
+	return err != nil && !errors.Is(err, context.Canceled)
 }

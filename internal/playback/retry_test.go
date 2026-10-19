@@ -8,6 +8,13 @@ import (
 	"time"
 )
 
+func TestPlayPropagatesInvalidRequest(t *testing.T) {
+	_, err := Play(context.Background(), nil, "http://127.0.0.1", []Call{{Method: "not a method", Path: "/"}}, DefaultPolicy())
+	if err == nil {
+		t.Fatal("expected request construction error")
+	}
+}
+
 func TestRetriesTransientFailure(t *testing.T) {
 	var hits int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
