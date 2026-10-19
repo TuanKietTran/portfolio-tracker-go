@@ -4,21 +4,18 @@ info:
   version: 1.0.0
   description: >-
     Current production-router contract. Trades and summary share accounting state.
-    Cash remains a local simulation; trades atomically update holdings and cash.
+    Local cash is the default; explicit payments mode confirms settled payment and reconciliation before updating in-memory cash.
     Keyed instrument and deterministic historical-price management are callable.
     Position and summary holdings are current snapshots; as_of selects historical
     price marks only, not historical holdings or trade-event replay. FX conversion
     and cross-currency aggregation are not implemented.
     Keyed corporate split/dividend/fee actions and bounded historical TWR/MWR queries are callable.
-    The original in-process playback exercises a separate legacy compatibility adapter.
+    The legacy 1,000-call playback exercises its compatibility adapter separately; a 10,000-call faulted replay exercises the production router on a real loopback httptest listener.
     All production responses include X-Request-ID. Errors use the Error schema;
     common runtime errors are 404 (route), 405 (method) and 500 (panic before response).
     Mutation bodies are limited to 16384 bytes; unknown JSON fields and trailing values
     are rejected with 400, oversized bodies with 413. Keys must be nonblank and at
-    most 200 bytes. HTTP_ADDR defaults to :8105, CASH_MODE supports local only,
-    COST_METHOD selects the legacy FIFO (default) or AVERAGE_COST trade default; explicitly
-    created portfolios use their own immutable cost_method. PAYMENTS_URL and DATABASE_URL
-    fail startup until their adapters are implemented. New portfolio balance/holding
+    most 200 bytes. HTTP_ADDR defaults to 127.0.0.1:8105 and must bind to loopback. CASH_MODE defaults to local; payments mode requires a loopback PAYMENTS_URL and distinct synthetic PAYMENTS_SOURCE_ACCOUNT and PAYMENTS_DEST_ACCOUNT. It creates/processes/re-reads payment intents, requires SETTLED with LedgerTxID and clean GET /v1/reconciliation before applying local cash. Stable payment intent keys enable replay after ambiguous responses, but are not durable in portfolio state. The payment contract supports USD/EUR/GBP only. DATABASE_URL fails startup until persistence is implemented. COST_METHOD selects FIFO (default) or AVERAGE_COST; explicitly created portfolios use their immutable cost_method. New portfolio balance/holding
     commands return503 without effect if the UTC history clock is invalid or moves
     backwards for that portfolio; original successful-key replays remain available.
     Portfolio mutations retain in-memory timestamped command/holding/cash history;
@@ -149,21 +146,21 @@ paths:
     get:
       operationId: health
       responses:
-        '200': { description: Process healthy; reports local cash mode and memory store. }
+        '200': { description: Process healthy; reports configured cash mode and memory store. }
   /readyz:
     get:
       operationId: readiness
-      description: Local simulation initialized; does not promise downstream availability, durable storage or price coverage.
+      description: Configured in-memory portfolio initialized; does not promise payment API availability, durable storage or price coverage.
       responses:
-        '200': { description: Local simulation ready. }
-        '503': { description: Local simulation uninitialized or readiness check failed. }
+        '200': { description: Configured in-memory portfolio runtime ready. }
+        '503': { description: Portfolio runtime uninitialized or readiness check failed. }
         '500': { description: Recovered readiness panic; no private details returned. }
   /metrics:
     get:
       operationId: metrics
       responses:
         '200':
-          description: Per-router process-lifetime counters, including this request; counters reset on restart.
+          description: Per-router request/error/panic counters plus process heap, goroutine, HTTP connection and latest GC-pause gauges; counters reset on restart.
           content:
             application/json:
               schema:
@@ -172,6 +169,46 @@ paths:
                   requests: { type: integer, format: int64 }
                   errors: { type: integer, format: int64 }
                   panics: { type: integer, format: int64 }
+                  heap_alloc_bytes: { type: integer, format: int64 }
+                  heap_objects: { type: integer, format: int64 }
+                  goroutines: { type: integer, format: int64 }
+                  http_connections: { type: integer, format: int64 }
+                  gc_last_pause_ns: { type: integer, format: int64 }
+  /debug/pprof/:
+    get:
+      operationId: pprofIndex
+      responses:
+        '200': { description: Go runtime profiling index; loopback-only listener. }
+  /debug/pprof/cmdline:
+    get:
+      operationId: pprofCmdline
+      responses:
+        '200': { description: Go process command line; loopback-only listener. }
+  /debug/pprof/profile:
+    get:
+      operationId: pprofCPU
+      responses:
+        '200': { description: Go CPU profile, bounded to10 seconds; loopback-only listener. }
+  /debug/pprof/symbol:
+    get:
+      operationId: pprofSymbolGet
+      responses:
+        '200': { description: Go profile symbol lookup; loopback-only listener. }
+    post:
+      operationId: pprofSymbolPost
+      responses:
+        '200': { description: Go profile symbol lookup; loopback-only listener. }
+  /debug/pprof/trace:
+    get:
+      operationId: pprofTrace
+      responses:
+        '200': { description: Go runtime trace, bounded to10 seconds; loopback-only listener. }
+  /debug/pprof/{profile}:
+    get:
+      operationId: pprofProfile
+      responses:
+        '200': { description: Go named runtime profile such as heap or goroutine; loopback-only listener. }
+        '404': { description: Unknown profile. }
   /v1/portfolios/{id}/corporate-actions:
     post:
       operationId: applyCorporateAction
@@ -438,7 +475,7 @@ paths:
   /v1/portfolios/{id}/cash/fund:
     post:
       operationId: fundCash
-      description: Local cash simulation only; external payment configuration is rejected at startup.
+      description: Local mode applies simulated cash. Payments mode requires settled payment and clean reconciliation before local cash changes; retry an ambiguous result with the original idempotency key.
       parameters:
         - { $ref: '#/components/parameters/PortfolioId' }
         - { $ref: '#/components/parameters/IdempotencyKey' }
@@ -452,11 +489,11 @@ paths:
         '400': { description: Invalid request. }
         '413': { description: Request body exceeds 16384 bytes. }
         '409': { description: Idempotency or immutable portfolio currency conflict. }
-        '503': { description: Unavailable/regressed history clock or unsafe payment boundary; no effect/key consumption/transfer. }
+        '503': { description: History clock or payment/reconciliation unavailable; local cash is unchanged, and an ambiguous payment must be retried with the original key. }
   /v1/portfolios/{id}/cash/withdraw:
     post:
       operationId: withdrawCash
-      description: Local cash simulation only; insufficient funds cannot debit balance.
+      description: Local mode simulates cash. Payments mode settles an idempotent payment and reconciles before local debit; insufficient local funds cannot trigger a payment.
       parameters:
         - { $ref: '#/components/parameters/PortfolioId' }
         - { $ref: '#/components/parameters/IdempotencyKey' }
@@ -470,7 +507,7 @@ paths:
         '400': { description: Invalid request. }
         '413': { description: Request body exceeds 16384 bytes. }
         '409': { description: Idempotency or immutable portfolio currency conflict, or insufficient cash. }
-        '503': { description: Unavailable/regressed history clock or unsafe payment boundary; no effect/key consumption/transfer. }
+        '503': { description: History clock or payment/reconciliation unavailable; local cash is unchanged, and an ambiguous payment must be retried with the original key. }
 components:
   parameters:
     MarketSymbol:

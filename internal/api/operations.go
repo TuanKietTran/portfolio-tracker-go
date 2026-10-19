@@ -7,10 +7,14 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/pprof"
+	"runtime"
+	"strconv"
 	"sync/atomic"
 	"time"
 
 	"github.com/TuanKietTran/portfolio-tracker-go/internal/command"
+	"github.com/TuanKietTran/portfolio-tracker-go/internal/server"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
@@ -84,7 +88,11 @@ type requestMetrics struct{ requests, errors, panics atomic.Uint64 }
 // NewRouter owns operational state per instance, without process-global counters.
 // Readiness means the configured in-memory simulation is initialized, not that
 // external payments, persistence or every requested price is available.
-func NewRouter(service *command.PortfolioService, logger *slog.Logger, ready func(context.Context) error) chi.Router {
+func NewRouter(service *command.PortfolioService, logger *slog.Logger, ready func(context.Context) error, cashModes ...string) chi.Router {
+	cashMode := "local"
+	if len(cashModes) > 0 && cashModes[0] == "payments" {
+		cashMode = "payments"
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -124,30 +132,63 @@ func NewRouter(service *command.PortfolioService, logger *slog.Logger, ready fun
 	r.MethodNotAllowed(func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, 405, "method_not_allowed", "method not allowed")
 	})
-	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) { writeStatus(w, 200, "ok") })
+	r.Get("/debug/pprof/", pprof.Index)
+	r.Get("/debug/pprof/cmdline", pprof.Cmdline)
+	r.Get("/debug/pprof/profile", boundedPprof(pprof.Profile))
+	r.Get("/debug/pprof/symbol", pprof.Symbol)
+	r.Post("/debug/pprof/symbol", pprof.Symbol)
+	r.Get("/debug/pprof/trace", boundedPprof(pprof.Trace))
+	r.Get("/debug/pprof/{profile}", func(w http.ResponseWriter, req *http.Request) {
+		pprof.Handler(chi.URLParam(req, "profile")).ServeHTTP(w, req)
+	})
+	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) { writeStatus(w, 200, "ok", cashMode) })
 	r.Get("/readyz", func(w http.ResponseWriter, req *http.Request) {
 		if service == nil {
-			writeError(w, 503, "not_ready", "local simulation not initialized")
+			writeError(w, 503, "not_ready", "portfolio runtime not initialized")
 			return
 		}
 		if ready != nil {
 			if err := ready(req.Context()); err != nil {
-				writeError(w, 503, "not_ready", "local simulation not ready")
+				writeError(w, 503, "not_ready", "portfolio runtime not ready")
 				return
 			}
 		}
-		writeStatus(w, 200, "ready")
+		writeStatus(w, 200, "ready", cashMode)
 	})
 	r.Get("/metrics", func(w http.ResponseWriter, _ *http.Request) {
+		var memory runtime.MemStats
+		runtime.ReadMemStats(&memory)
+		pauseIndex := (memory.NumGC + 255) % 256
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]uint64{"requests": metrics.requests.Load(), "errors": metrics.errors.Load(), "panics": metrics.panics.Load()})
+		_ = json.NewEncoder(w).Encode(map[string]uint64{
+			"requests": metrics.requests.Load(), "errors": metrics.errors.Load(), "panics": metrics.panics.Load(),
+			"heap_alloc_bytes": memory.HeapAlloc, "heap_objects": memory.HeapObjects,
+			"goroutines": uint64(runtime.NumGoroutine()), "http_connections": uint64(server.ActiveConnections()),
+			"gc_last_pause_ns": memory.PauseNs[pauseIndex],
+		})
 	})
 	r.Mount("/v1", NewPortfolioHandlers(service).Routes())
 	return r
 }
 
-func writeStatus(w http.ResponseWriter, status int, state string) {
+func boundedPprof(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		seconds, err := strconv.Atoi(req.URL.Query().Get("seconds"))
+		if err != nil || seconds < 1 || seconds > 10 {
+			query := req.URL.Query()
+			query.Set("seconds", "10")
+			clone := req.Clone(req.Context())
+			urlCopy := *req.URL
+			urlCopy.RawQuery = query.Encode()
+			clone.URL = &urlCopy
+			req = clone
+		}
+		handler(w, req)
+	}
+}
+
+func writeStatus(w http.ResponseWriter, status int, state, cashMode string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": state, "cash_mode": "local", "store": "memory"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": state, "cash_mode": cashMode, "store": "memory"})
 }

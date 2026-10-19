@@ -12,6 +12,7 @@ import (
 
 	"github.com/TuanKietTran/portfolio-tracker-go/internal/api"
 	"github.com/TuanKietTran/portfolio-tracker-go/internal/command"
+	"github.com/TuanKietTran/portfolio-tracker-go/internal/payments"
 	"github.com/TuanKietTran/portfolio-tracker-go/internal/repository"
 	"github.com/TuanKietTran/portfolio-tracker-go/internal/server"
 )
@@ -33,7 +34,14 @@ func run(ctx context.Context, getenv func(string) string, logger *slog.Logger) e
 	}
 	state := repository.NewInMemoryState()
 	prices := repository.NewStaticPriceFeed()
-	service, err := command.NewPortfolioService(state, prices, nil, config.CostMethod)
+	var paymentPort command.PaymentCashPort
+	if config.CashMode == "payments" {
+		paymentPort, err = payments.NewClient(config.PaymentsURL, config.PaymentsSourceAccount, config.PaymentsDestAccount, nil)
+		if err != nil {
+			return err
+		}
+	}
+	service, err := command.NewPortfolioService(state, prices, paymentPort, config.CostMethod)
 	if err != nil {
 		return err
 	}
@@ -43,7 +51,7 @@ func run(ctx context.Context, getenv func(string) string, logger *slog.Logger) e
 	}
 	defer listener.Close()
 	logger.Info("portfolio API listening", "address", listener.Addr().String(), "cash_mode", config.CashMode, "store", "memory", "cost_method", config.CostMethod)
-	err = server.Serve(ctx, listener, api.NewRouter(service, logger, nil), config.ShutdownTimeout)
+	err = server.Serve(ctx, listener, api.NewRouter(service, logger, nil, config.CashMode), config.ShutdownTimeout)
 	if errors.Is(err, context.Canceled) {
 		return nil
 	}

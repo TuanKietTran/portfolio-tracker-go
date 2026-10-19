@@ -14,10 +14,10 @@ import (
 
 func TestValidatedRuntimeConfiguration(t *testing.T) {
 	config, err := LoadConfig(func(string) string { return "" })
-	if err != nil || config.HTTPAddr != ":8105" || config.CashMode != "local" || config.CostMethod != domain.FIFO {
+	if err != nil || config.HTTPAddr != "127.0.0.1:8105" || config.CashMode != "local" || config.CostMethod != domain.FIFO {
 		t.Fatalf("config=%+v err=%v", config, err)
 	}
-	for _, env := range []map[string]string{{"HTTP_ADDR": "bad"}, {"HTTP_ADDR": ":0"}, {"HTTP_ADDR": ":70000"}, {"HTTP_ADDR": ":not-a-port"}, {"CASH_MODE": "external"}, {"PAYMENTS_URL": "http://localhost:8102"}, {"DATABASE_URL": "unsupported-test-value"}, {"COST_METHOD": "LIFO"}} {
+	for _, env := range []map[string]string{{"HTTP_ADDR": "bad"}, {"HTTP_ADDR": ":0"}, {"HTTP_ADDR": ":70000"}, {"HTTP_ADDR": ":not-a-port"}, {"HTTP_ADDR": "0.0.0.0:8105"}, {"CASH_MODE": "external"}, {"PAYMENTS_URL": "http://127.0.0.1:8102"}, {"CASH_MODE": "payments"}, {"CASH_MODE": "payments", "PAYMENTS_URL": "http://example.test", "PAYMENTS_SOURCE_ACCOUNT": "source", "PAYMENTS_DEST_ACCOUNT": "dest"}, {"CASH_MODE": "payments", "PAYMENTS_URL": "http://127.0.0.1:8102", "PAYMENTS_SOURCE_ACCOUNT": "same", "PAYMENTS_DEST_ACCOUNT": "same"}, {"DATABASE_URL": "unsupported-test-value"}, {"COST_METHOD": "LIFO"}} {
 		if _, err := LoadConfig(func(key string) string { return env[key] }); err == nil {
 			t.Fatalf("accepted env=%v", env)
 		}
@@ -28,9 +28,24 @@ func TestValidatedRuntimeConfiguration(t *testing.T) {
 	if err != nil || config.CostMethod != domain.AverageCost || config.HTTPAddr != "127.0.0.1:8105" {
 		t.Fatalf("config=%+v err=%v", config, err)
 	}
+	paymentConfig, err := LoadConfig(func(key string) string {
+		return map[string]string{"CASH_MODE": "payments", "PAYMENTS_URL": "http://127.0.0.1:8102", "PAYMENTS_SOURCE_ACCOUNT": "synthetic-source", "PAYMENTS_DEST_ACCOUNT": "synthetic-destination"}[key]
+	})
+	if err != nil || paymentConfig.CashMode != "payments" || paymentConfig.PaymentsURL != "http://127.0.0.1:8102" {
+		t.Fatalf("payment config=%+v err=%v", paymentConfig, err)
+	}
 	server := NewHTTPServer(http.NotFoundHandler())
 	if server.ReadHeaderTimeout <= 0 || server.ReadTimeout <= 0 || server.WriteTimeout <= 0 || server.IdleTimeout <= 0 || server.MaxHeaderBytes != 16<<10 {
 		t.Fatal("unbounded HTTP server")
+	}
+	before := ActiveConnections()
+	server.ConnState(nil, http.StateNew)
+	if ActiveConnections() != before+1 {
+		t.Fatalf("new connection gauge=%d want=%d", ActiveConnections(), before+1)
+	}
+	server.ConnState(nil, http.StateClosed)
+	if ActiveConnections() != before {
+		t.Fatalf("closed connection gauge=%d want=%d", ActiveConnections(), before)
 	}
 }
 

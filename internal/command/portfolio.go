@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/TuanKietTran/portfolio-tracker-go/internal/domain"
 	"github.com/TuanKietTran/portfolio-tracker-go/internal/repository"
@@ -21,7 +22,7 @@ func (f PriceFunc) Price(ctx context.Context, symbol, currency string) (domain.P
 	return f(ctx, symbol, currency)
 }
 
-var ErrPaymentCashUnavailable = errors.New("payment-backed cash requires a recovery-safe outbox; unavailable")
+var ErrPaymentCashUnavailable = errors.New("payment-backed cash operation unavailable")
 
 type PaymentCashPort interface {
 	Move(context.Context, uuid.UUID, string, string, decimal.Decimal, string) error
@@ -32,6 +33,7 @@ type PortfolioService struct {
 	prices   PriceFeed
 	payments PaymentCashPort
 	method   domain.CostMethod
+	cashMu   *sync.Mutex
 }
 
 func NewPortfolioService(state repository.PortfolioState, prices PriceFeed, payments PaymentCashPort, method domain.CostMethod) (*PortfolioService, error) {
@@ -41,10 +43,14 @@ func NewPortfolioService(state repository.PortfolioState, prices PriceFeed, paym
 	if method != domain.FIFO && method != domain.AverageCost {
 		return nil, errors.New("unsupported accounting method")
 	}
-	return &PortfolioService{state: state, prices: prices, payments: payments, method: method}, nil
+	return &PortfolioService{state: state, prices: prices, payments: payments, method: method, cashMu: &sync.Mutex{}}, nil
 }
 
 func (s *PortfolioService) Trade(ctx context.Context, portfolio uuid.UUID, symbol string, event domain.AccountingEvent, key string) (domain.AccountPosition, error) {
+	if s.payments != nil {
+		s.cashMu.Lock()
+		defer s.cashMu.Unlock()
+	}
 	if symbol == "" || strings.TrimSpace(symbol) != symbol {
 		return domain.AccountPosition{}, errors.New("symbol is required")
 	}
@@ -148,8 +154,26 @@ func (s *PortfolioService) MoveCash(ctx context.Context, portfolio uuid.UUID, cu
 	if direction != "FUND" && direction != "WITHDRAW" {
 		return decimal.Zero, errors.New("unsupported cash direction")
 	}
+	if err := domain.ValidateCashAmount(amount, currency); err != nil {
+		return decimal.Zero, err
+	}
 	if s.payments != nil {
-		return decimal.Zero, ErrPaymentCashUnavailable
+		s.cashMu.Lock()
+		defer s.cashMu.Unlock()
+		balance, err := s.state.CashBalance(ctx, portfolio, currency)
+		if err != nil {
+			return decimal.Zero, err
+		}
+		if direction == "WITHDRAW" && balance.LessThan(amount) {
+			return balance, repository.ErrInsufficientCash
+		}
+		if err := s.payments.Move(ctx, portfolio, currency, direction, amount, key); err != nil {
+			var intentConflict interface{ PaymentIntentConflict() bool }
+			if errors.As(err, &intentConflict) && intentConflict.PaymentIntentConflict() {
+				return decimal.Zero, repository.ErrIdempotencyConflict
+			}
+			return decimal.Zero, ErrPaymentCashUnavailable
+		}
 	}
 	return s.state.MoveCash(ctx, portfolio, currency, direction, amount, key)
 }
@@ -163,5 +187,9 @@ func (s *PortfolioService) Portfolio(ctx context.Context, id uuid.UUID) (reposit
 }
 
 func (s *PortfolioService) CorporateAction(ctx context.Context, portfolio uuid.UUID, symbol string, action domain.CorporateAction, key string) (repository.CorporateResult, error) {
+	if s.payments != nil {
+		s.cashMu.Lock()
+		defer s.cashMu.Unlock()
+	}
 	return s.state.ApplyCorporateAction(ctx, portfolio, symbol, action, key)
 }

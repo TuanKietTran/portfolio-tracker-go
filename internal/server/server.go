@@ -6,27 +6,41 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/TuanKietTran/portfolio-tracker-go/internal/domain"
 )
 
+var activeConnections atomic.Int64
+
+func ActiveConnections() int64 { return activeConnections.Load() }
+
 type Config struct {
-	HTTPAddr        string
-	CashMode        string
-	CostMethod      domain.CostMethod
-	ShutdownTimeout time.Duration
+	HTTPAddr              string
+	CashMode              string
+	PaymentsURL           string
+	PaymentsSourceAccount string
+	PaymentsDestAccount   string
+	CostMethod            domain.CostMethod
+	ShutdownTimeout       time.Duration
 }
 
 func LoadConfig(getenv func(string) string) (Config, error) {
-	c := Config{HTTPAddr: ":8105", CashMode: "local", CostMethod: domain.FIFO, ShutdownTimeout: 5 * time.Second}
+	c := Config{HTTPAddr: "127.0.0.1:8105", CashMode: "local", CostMethod: domain.FIFO, ShutdownTimeout: 5 * time.Second}
 	if value := getenv("HTTP_ADDR"); value != "" {
 		c.HTTPAddr = value
 	}
-	_, port, err := net.SplitHostPort(c.HTTPAddr)
+	host, port, err := net.SplitHostPort(c.HTTPAddr)
 	if err != nil {
 		return Config{}, errors.New("HTTP_ADDR must be host:port")
+	}
+	ip := net.ParseIP(host)
+	if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		return Config{}, errors.New("HTTP_ADDR must bind to loopback")
 	}
 	number, err := strconv.Atoi(port)
 	if err != nil || number < 1 || number > 65535 {
@@ -35,11 +49,27 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 	if value := getenv("CASH_MODE"); value != "" {
 		c.CashMode = value
 	}
-	if c.CashMode != "local" {
-		return Config{}, errors.New("only CASH_MODE=local is implemented; external funding unavailable")
+	if c.CashMode != "local" && c.CashMode != "payments" {
+		return Config{}, errors.New("CASH_MODE must be local or payments")
 	}
-	if getenv("PAYMENTS_URL") != "" {
-		return Config{}, errors.New("PAYMENTS_URL is not supported until recovery-safe cash outbox is implemented")
+	c.PaymentsURL = getenv("PAYMENTS_URL")
+	c.PaymentsSourceAccount = getenv("PAYMENTS_SOURCE_ACCOUNT")
+	c.PaymentsDestAccount = getenv("PAYMENTS_DEST_ACCOUNT")
+	if c.CashMode == "local" && c.PaymentsURL != "" {
+		return Config{}, errors.New("PAYMENTS_URL requires CASH_MODE=payments")
+	}
+	if c.CashMode == "payments" {
+		parsed, err := url.ParseRequestURI(c.PaymentsURL)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return Config{}, errors.New("payments mode requires an absolute HTTP PAYMENTS_URL")
+		}
+		host := parsed.Hostname()
+		if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+			return Config{}, errors.New("PAYMENTS_URL must use loopback")
+		}
+		if strings.TrimSpace(c.PaymentsSourceAccount) == "" || strings.TrimSpace(c.PaymentsDestAccount) == "" || c.PaymentsSourceAccount != strings.TrimSpace(c.PaymentsSourceAccount) || c.PaymentsDestAccount != strings.TrimSpace(c.PaymentsDestAccount) || c.PaymentsSourceAccount == c.PaymentsDestAccount || len(c.PaymentsSourceAccount) > 200 || len(c.PaymentsDestAccount) > 200 {
+			return Config{}, errors.New("payments mode requires distinct payment account identifiers of at most 200 bytes")
+		}
 	}
 	if getenv("DATABASE_URL") != "" {
 		return Config{}, errors.New("DATABASE_URL is not supported by the memory runtime")
@@ -54,7 +84,18 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 }
 
 func NewHTTPServer(handler http.Handler) *http.Server {
-	return &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
+	return &http.Server{
+		Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
+		WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10,
+		ConnState: func(_ net.Conn, state http.ConnState) {
+			switch state {
+			case http.StateNew:
+				activeConnections.Add(1)
+			case http.StateClosed, http.StateHijacked:
+				activeConnections.Add(-1)
+			}
+		},
+	}
 }
 
 // Serve drains in-flight requests on cancellation, then forces closure if the

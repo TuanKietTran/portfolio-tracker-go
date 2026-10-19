@@ -53,6 +53,26 @@ func TestOperationalRequestsRecoveryReadinessAndMetrics(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &metrics); err != nil || metrics["requests"] != 5 || metrics["errors"] != 3 || metrics["panics"] != 1 {
 		t.Fatalf("metrics=%s err=%v", w.Body, err)
 	}
+	for _, key := range []string{"heap_alloc_bytes", "heap_objects", "goroutines", "http_connections", "gc_last_pause_ns"} {
+		if _, ok := metrics[key]; !ok {
+			t.Errorf("runtime metric %q missing from %s", key, w.Body)
+		}
+	}
+	pprofIndex := httptest.NewRecorder()
+	router.ServeHTTP(pprofIndex, httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil))
+	if pprofIndex.Code != http.StatusOK || !strings.Contains(pprofIndex.Body.String(), "heap?debug=1") {
+		t.Fatalf("pprof index=%d %s", pprofIndex.Code, pprofIndex.Body)
+	}
+	goroutines := httptest.NewRecorder()
+	router.ServeHTTP(goroutines, httptest.NewRequest(http.MethodGet, "/debug/pprof/goroutine?debug=1", nil))
+	if goroutines.Code != http.StatusOK || goroutines.Body.Len() == 0 {
+		t.Fatalf("goroutine profile=%d %s", goroutines.Code, goroutines.Body)
+	}
+	cpuProfile := httptest.NewRecorder()
+	router.ServeHTTP(cpuProfile, httptest.NewRequest(http.MethodGet, "/debug/pprof/profile?seconds=1", nil))
+	if cpuProfile.Code != http.StatusOK || cpuProfile.Body.Len() == 0 {
+		t.Fatalf("CPU profile=%d %s", cpuProfile.Code, cpuProfile.Body)
+	}
 	unavailable := NewRouter(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), func(context.Context) error { return errors.New("private-health-details") })
 	w = httptest.NewRecorder()
 	unavailable.ServeHTTP(w, httptest.NewRequest("GET", "/readyz", nil))
@@ -64,6 +84,12 @@ func TestOperationalRequestsRecoveryReadinessAndMetrics(t *testing.T) {
 	uninitialized.ServeHTTP(w, httptest.NewRequest("GET", "/readyz", nil))
 	if w.Code != 503 {
 		t.Fatal("nil service ready")
+	}
+	paymentsReady := NewRouter(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), nil, "payments")
+	paymentsHealth := httptest.NewRecorder()
+	paymentsReady.ServeHTTP(paymentsHealth, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if !strings.Contains(paymentsHealth.Body.String(), `"cash_mode":"payments"`) {
+		t.Fatalf("payments health=%s", paymentsHealth.Body)
 	}
 	ready := NewRouter(svc, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
 	w = httptest.NewRecorder()
