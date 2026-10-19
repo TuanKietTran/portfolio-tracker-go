@@ -53,7 +53,7 @@ Commit recorded in STATUS. Full build/vet/empty-gofmt/race/tidy/diff gates passe
 
 ### 2026-10-18 operational runtime checkpoint
 
-`a56180c`. `go build ./...`, `go vet ./...`, empty `gofmt -l .`, race tests with default and `-coverpkg=./...` profiles, tidy with no module diff and diff check passed. Domain94.9%, server95.5%; aggregate unique non-cmd630/715=88.11%, package-local535/715=74.83%. Full evidence `ctl/logs/portfolio/operations-gates.log`. `go test ./internal/server -race -count=10` passed; lifecycle tests use channel synchronization. Native compiled process on127.0.0.1:8105 with AVERAGE_COST returned200 for readiness/health/metrics and exited0 on SIGTERM; process structured logs in ctl `operations-process.log`. No external cash/persistence/integration claim.
+`a56180c`. `go build ./...`, `go vet ./...`, empty `gofmt -l .`, race tests with default and `-coverpkg=./...` profiles, tidy with no module diff and diff check passed. Domain94.9%, server95.5%; aggregate unique non-cmd630/715=88.11%, package-local535/715=74.83%. Full evidence (local gate log, not committed). `go test ./internal/server -race -count=10` passed; lifecycle tests use channel synchronization. Native compiled process on127.0.0.1:8105 with AVERAGE_COST returned200 for readiness/health/metrics and exited0 on SIGTERM; process structured logs in ctl `operations-process.log`. No external cash/persistence/integration claim.
 
 ### 2026-10-18 exact residual-basis checkpoint
 
