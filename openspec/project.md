@@ -1,10 +1,10 @@
 # Portfolio tracker
 
-CQRS portfolio simulation. Production named/position trades share exact FIFO accounting state, and explicit as-of summary queries compute marked security value and P&L. The older adapter and playback are retained as historical regression fixtures, not server wiring. Cash and trades commit atomically in the local simulation; external payments remain unavailable until outbox/recovery support exists.
+CQRS portfolio simulation. Production named/position trades share exact FIFO accounting state, and explicit as-of summary queries compute marked security value and P&L. The older adapter and playback are retained as historical regression fixtures, not server wiring. Cash and trades commit atomically in local mode. Explicit payments mode confirms a stable, idempotent payment intent and reconciliation before local cash changes; portfolio-side restart durability remains unavailable.
 
 ## Stack
 
-Go module1.22; native verification Go1.27.1 macOS arm64. Chi, `shopspring/decimal`, Google UUID. In-memory only; unsupported database/payment configuration fails startup. HTTP defaults :8105 with selectable FIFO/average accounting, bounded lifecycle and local-only readiness.
+Go module1.22; historical coverage evidence used Go1.27.1 macOS arm64; current gates use Go1.27.2 Windows/amd64. Chi, `shopspring/decimal`, Google UUID. In-memory only; unsupported database configuration fails startup. HTTP defaults 127.0.0.1:8105 with selectable FIFO/average accounting, bounded lifecycle, local default cash and optional loopback payments mode; readiness reports local initialization only.
 
 ## Public API
 
