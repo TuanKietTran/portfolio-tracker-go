@@ -1,7 +1,0 @@
-# Bounded historical portfolio returns
-
-Add GET /v1/portfolios/{id}/returns with required method TWR/MWR, period/currency/freshness and optional bounded MWR numeric controls. Capture one historical holdings/flow window under the memory lock and freeze currently known price history so a query cannot mix evolving price reads. Select investor flows from(from,to], include starting NAV once and use individual same-time flow snapshots/sequence.
-
-TWR geometrically links pre-flow NAV/previous post-flow NAV with fixed18-place ratios and final rate, nonannualized. Strictly positive capital is required at all boundaries; zero/total-loss windows fail explicitly rather than weakening the existing pure primitive's contract. MWR uses ACT/365 fixed elapsed seconds, decimal cash with float discount factors, conventional-flow uniqueness restrictions and guarded bounded bisection requiring both residual and bracket tolerances. Keep the legacy pure IRR regression primitive unchanged; public query uses the guarded solver.
-
-Bound queries to3650 days,4096 portfolio commands,256 external flows and256 solver iterations. Reject FX, missing/stale prices, ambiguous sign patterns, unbracketed roots and nonconvergence without partial rates. Expose model residual/bracket diagnostics honestly, not a formal floating-point discount-error guarantee. Record remaining zero-capital/multiple-IRR limitations; no payment/durable/S3 claim.
