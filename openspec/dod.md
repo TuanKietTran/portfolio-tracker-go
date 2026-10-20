@@ -45,7 +45,3 @@ Met means implemented and asserted by named tests. This is a synthetic local-mem
 | Postgres parity and restart recovery | No durable adapter/outbox; memory loses all state on process restart. |
 | Cross-process/platform 10,000 request integration/load | Local production-router R1 is proved by the named 10k test; manager-owned platform S1/S2/S3/load evidence and soak remain pending. |
 | CI/Docker execution | No workflow/container run claimed. |
-
-## Historical regression evidence
-
-The original playback tests remain unchanged, including legacy missing-key and repeated-key behavior, against `NewHandlers`/`NewInMemoryPortfolio`. These are not production server wiring. Production now rejects missing keys and accepts same-payload replay without another effect. The original storyboard is `openspec/gifs/playback-flow.gif`; it is not a native process capture.
